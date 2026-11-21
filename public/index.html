@@ -259,6 +259,25 @@ html,body{width:100vw;height:100dvh}
 @media(max-height:660px){.rail{bottom:calc(120px + env(safe-area-inset-bottom));transform:scale(.85);transform-origin:right bottom}}
 @media(max-height:560px){.rail{transform:scale(.65)}}
 @media(max-height:480px){.rail{transform:scale(.4)}}
+/* functional buttons: overlays only, no change to existing sizes/positions */
+.search-field input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:#fff;font:inherit;font-size:14px;padding:0;cursor:text;-webkit-appearance:none;appearance:none}
+.search-field input::placeholder{color:#fff;opacity:.85}
+.search-field input::-webkit-search-cancel-button{display:none}
+.rail-item.on svg{fill:#ff2d55;stroke:#ff2d55}
+#r-save.on svg{fill:#FFD700;stroke:#FFD700}
+.fx-back{position:absolute;inset:0;z-index:79;background:rgba(0,0,0,.55)}
+.fx-back[hidden],.fx-drawer[hidden],.fx-pg[hidden]{display:none}
+.fx-drawer{position:absolute;top:0;bottom:0;left:0;width:min(78%,300px);z-index:80;background:#111;color:#fff;padding:calc(env(safe-area-inset-top,0px) + 70px) 12px 20px;display:flex;flex-direction:column;gap:6px;box-shadow:10px 0 40px rgba(0,0,0,.6)}
+.fx-drawer button,.fx-menu button{min-height:48px;border-radius:12px;border:0;background:#1a1a1a;color:#fff;font-size:15px;font-weight:600;text-align:left;padding:0 14px;cursor:pointer}
+.fx-drawer button:active,.fx-menu button:active{background:#FFD700;color:#000}
+.fx-menu{display:flex;flex-direction:column;gap:8px}
+.fx-pg{position:absolute;top:116px;bottom:64px;left:0;right:0;z-index:50;background:#0b0b0b;color:#fff;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.fx-pg h3{margin:0;font-size:18px}
+.fx-pg .it{background:#1a1a1a;border-radius:12px;padding:12px;font-size:14px;line-height:1.4;cursor:pointer;word-break:break-word}
+.fx-pg .it small{color:#aaa;display:block}
+.fx-cm{display:flex;gap:8px}
+.fx-cm input{flex:1;min-width:0;height:44px;border-radius:999px;border:1px solid #333;background:#1a1a1a;color:#fff;padding:0 14px;font-size:14px}
+.fx-cm button{height:44px;padding:0 16px;border-radius:999px;border:0;background:#FFD700;color:#000;font-weight:700}
 </style>
 </head>
 <body>
@@ -271,13 +290,13 @@ html,body{width:100vw;height:100dvh}
   <div class="gradient-bottom"></div>
   <div class="topbar">
     <div class="top-left">
-      <button class="btn-circle" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      <button class="btn-circle" id="b-menu" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
       <div class="top-title">{{BRAND_NAME}}</div>
     </div>
-    <button class="search-field" id="open-search" type="button" aria-label="Recherche"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Recherche...</span></button>
+    <form class="search-field" id="open-search" role="search" action="javascript:void(0)"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="q" type="search" placeholder="Recherche..." enterkeyhint="search" autocomplete="off" aria-label="Recherche"></form>
     <div class="top-right">
       <button class="btn-circle" id="open-search-icon" aria-label="Recherche" hidden><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
-      <button class="btn-circle" aria-label="Plus"><svg viewBox="0 0 24 24" fill="#fff"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+      <button class="btn-circle" id="b-more" aria-label="Plus"><svg viewBox="0 0 24 24" fill="#fff"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
     </div>
   </div>
   <div class="hist">
@@ -288,11 +307,11 @@ html,body{width:100vw;height:100dvh}
     <svg width="26" height="26" viewBox="0 0 24 24" fill="#000"><path d="M8 5v14l11-7z"/></svg>
   </button>
   <div class="rail">
-    <button class="rail-item"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9C1 8 3 4.5 6.5 4.5c2 0 3.5 1 4.5 2.5 1-1.5 2.5-2.5 4.5-2.5C19 4.5 21 8 19.5 12c-2.5 4.5-7.5 9-7.5 9z"/></svg></span><span class="rail-label">Like</span><span class="rail-count">3</span></button>
-    <button class="rail-item"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 12a8 8 0 0 1-11 7.5L3 21l1.5-4A8 8 0 1 1 21 12z"/></svg></span><span class="rail-label">Comment</span><span class="rail-count">0</span></button>
+    <button class="rail-item" id="r-like" aria-label="Like"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9C1 8 3 4.5 6.5 4.5c2 0 3.5 1 4.5 2.5 1-1.5 2.5-2.5 4.5-2.5C19 4.5 21 8 19.5 12c-2.5 4.5-7.5 9-7.5 9z"/></svg></span><span class="rail-label">Like</span><span class="rail-count">3</span></button>
+    <button class="rail-item" id="r-comment" aria-label="Commentaires"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 12a8 8 0 0 1-11 7.5L3 21l1.5-4A8 8 0 1 1 21 12z"/></svg></span><span class="rail-label">Comment</span><span class="rail-count">0</span></button>
     <button class="rail-item" id="rail-share" aria-label="Partager"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M14 4l7 7-7 7M21 11H9a6 6 0 0 0-6 6v2"/></svg></span><span class="rail-label">Partager</span><span class="rail-count">1</span></button>
-    <button class="rail-item"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M6 3h12v18l-6-4-6 4z"/></svg></span><span class="rail-label">Save</span><span class="rail-count">0</span></button>
-    <button class="rail-item"><span style="font-size:22px">•••</span></button>
+    <button class="rail-item" id="r-save" aria-label="Enregistrer"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M6 3h12v18l-6-4-6 4z"/></svg></span><span class="rail-label">Save</span><span class="rail-count">0</span></button>
+    <button class="rail-item" id="r-more" aria-label="Options"><span style="font-size:22px">•••</span></button>
   </div>
   <div class="info">
     <div class="user-row">
@@ -346,6 +365,12 @@ html,body{width:100vw;height:100dvh}
     <div id="up-label"></div>
     <div id="up-result"></div>
   </div>
+  <div class="fx-back" id="fx-back" hidden></div>
+  <div class="fx-drawer" id="fx-drawer" hidden>
+    <button data-go="home">Accueil</button><button data-go="clips">Clips</button><button data-go="search">Recherche</button><button data-go="inbox">Boîte de réception</button><button data-go="profile">Profil</button><button data-go="upload">⬆ Importer</button><button data-go="share">Partager</button>
+  </div>
+  <div class="fx-pg" id="fx-pg" hidden></div>
+  <div class="sh-sheet" id="fx-sheet" hidden></div>
   <div class="sh-sheet" id="sh-sheet" hidden></div>
   <div class="sh-toast" id="sh-toast" hidden></div>
   <div class="nav-agon">
@@ -367,11 +392,11 @@ html,body{width:100vw;height:100dvh}
     <button class="pill pill-dark">Ask AI</button>
   </div>
   <div class="tabbar">
-    <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10l9-7 9 7v10H3z"/></svg>Accueil</button>
-    <button class="tab active"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>{{TAB_LABEL}}</button>
-    <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>Recherche</button>
-    <button class="tab"><div class="tab-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18v14H3zM3 7l9 6 9-6"/></svg><span class="badge">14</span></div>Boîte de réception</button>
-    <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>Profil</button>
+    <button class="tab" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10l9-7 9 7v10H3z"/></svg>Accueil</button>
+    <button class="tab active" data-tab="clips"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>{{TAB_LABEL}}</button>
+    <button class="tab" data-tab="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>Recherche</button>
+    <button class="tab" data-tab="inbox"><div class="tab-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18v14H3zM3 7l9 6 9-6"/></svg><span class="badge">14</span></div>Boîte de réception</button>
+    <button class="tab" data-tab="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>Profil</button>
   </div>
 </div>
 <script>
@@ -401,6 +426,7 @@ html,body{width:100vw;height:100dvh}
     var p=v.play();if(p&&p.catch)p.catch(function(){pl.style.display='';});
     if(dir){wrap.classList.remove('slide-up','slide-down');void wrap.offsetWidth;wrap.classList.add(dir>0?'slide-up':'slide-down');}
   }
+  window.__arena={clips:function(){return clips},cur:function(){return i},play:function(n){if(n>=0&&n<clips.length){i=n;show(0);}}};
   function go(d){var n=i+d;if(n<0||n>=clips.length){return;}i=n;show(d);}
   var y0=null,x0=0,ph=document.querySelector('.phone');
   ph.addEventListener('touchstart',function(e){if(e.target.closest('button,a,input,textarea,.up-sheet,.sh-sheet'))return;y0=e.touches[0].clientY;x0=e.touches[0].clientX;},{passive:true});
@@ -410,6 +436,79 @@ html,body{width:100vw;height:100dvh}
   document.getElementById('next').onclick=function(){go(1)};
   document.getElementById('prev').onclick=function(){go(-1)};
   v.addEventListener('click',function(){v.paused?v.play():v.pause();});
+})();
+</script>
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var back=$('fx-back'),drawer=$('fx-drawer'),pg=$('fx-pg'),sheet=$('fx-sheet');
+  var esc=function(t){return String(t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})};
+  function toast(m){var t=$('sh-toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(function(){t.hidden=true},2400);}
+  function A(){return window.__arena||{clips:function(){return[]},cur:function(){return 0},play:function(){}};}
+  function key(){var c=A().clips()[A().cur()];return c?(c.url||'').split('?')[0]:'demo';}
+  function closeAll(){back.hidden=true;drawer.hidden=true;sheet.hidden=true;$('sh-sheet').hidden=true;}
+  function closePg(){pg.hidden=true;}
+  function setTab(n){document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.tab===n)});}
+  back.onclick=closeAll;
+  function openSheet(h){sheet.innerHTML=h;sheet.hidden=false;back.hidden=false;var x=sheet.querySelector('[data-x]');if(x)x.onclick=closeAll;}
+  /* like / save */
+  var store=JSON.parse(localStorage.getItem('fx')||'{}');function save(){localStorage.setItem('fx',JSON.stringify(store));}
+  function st(){var k=key();return store[k]||(store[k]={like:0,save:0,cm:[]});}
+  var like=$('r-like'),sv=$('r-save'),cmb=$('r-comment');
+  var base={like:+like.querySelector('.rail-count').textContent,save:+sv.querySelector('.rail-count').textContent};
+  function paint(){var s=st();
+    like.classList.toggle('on',!!s.like);like.querySelector('.rail-count').textContent=base.like+(s.like?1:0);
+    sv.classList.toggle('on',!!s.save);sv.querySelector('.rail-count').textContent=base.save+(s.save?1:0);
+    cmb.querySelector('.rail-count').textContent=s.cm.length;}
+  like.onclick=function(){var s=st();s.like=s.like?0:1;save();paint();};
+  sv.onclick=function(){var s=st();s.save=s.save?0:1;save();paint();toast(s.save?'تحفظ الفيديو ✓':'تحيد من المحفوظات');};
+  var _show=0;setInterval(function(){var k=key();if(_show!==k){_show=k;paint();}},400);
+  /* comments */
+  function cmHtml(){var s=st();return '<div class="up-head"><span>Commentaires ('+s.cm.length+')</span><button data-x>✕</button></div>'+
+    (s.cm.length?s.cm.map(function(c){return '<div class="it" style="background:#1a1a1a;border-radius:12px;padding:10px;font-size:14px">'+esc(c)+'</div>'}).join(''):'<div class="sh-sub">ما كاين حتى تعليق. كون الأول.</div>')+
+    '<form class="fx-cm" id="fx-cmf" action="javascript:void(0)"><input id="fx-cmi" placeholder="Ajouter un commentaire…" autocomplete="off"><button>Envoyer</button></form>';}
+  function openCm(){openSheet(cmHtml());bindCm();}
+  function bindCm(){$('fx-cmf').onsubmit=function(e){e.preventDefault();var v=$('fx-cmi').value.trim();if(!v)return;st().cm.push(v);save();paint();openCm();};}
+  cmb.onclick=openCm;
+  /* options menu (dots) */
+  function openMore(){openSheet('<div class="up-head"><span>Options</span><button data-x>✕</button></div><div class="fx-menu"><button data-a="share">Partager</button><button data-a="copy">Copier le lien</button><button data-a="report">Signaler</button></div>');
+    sheet.querySelectorAll('[data-a]').forEach(function(b){b.onclick=function(){var a=b.dataset.a;
+      if(a==='share'){closeAll();$('rail-share').click();}
+      else if(a==='copy'){var u=location.origin+location.pathname;var done=function(){toast('تنسخ الرابط ✓')};
+        if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(u).then(done,function(){fb(u);done()});else{fb(u);done();}closeAll();}
+      else{closeAll();toast('تسجل الإبلاغ، شكرا');}};});}
+  function fb(t){var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}a.remove();}
+  $('b-more').onclick=openMore;$('r-more').onclick=openMore;
+  /* drawer */
+  $('b-menu').onclick=function(){closeAll();back.hidden=false;drawer.hidden=false;};
+  /* pages */
+  function page(n){closeAll();
+    if(n==='clips'||n==='home'){closePg();setTab(n==='home'?'home':'clips');if(n==='home')A().play(0);return;}
+    setTab(n);pg.hidden=false;
+    if(n==='search'){pg.innerHTML='<h3>Recherche</h3><div class="sh-sub">Écris dans le champ en haut puis Entrée.</div>';$('q').focus();if($('q').value.trim())runSearch($('q').value);}
+    if(n==='inbox'){pg.innerHTML='<h3>Boîte de réception</h3><div class="it">Bienvenue sur {{BRAND_NAME}}<small>Nouveau</small></div><div class="it">El Qaisy Abdelmalik a publié un clip<small>Il y a 1 h</small></div><div class="it">14 notifications non lues<small>Aujourd’hui</small></div>';var b=document.querySelector('.tab .badge');if(b)b.textContent='0';}
+    if(n==='profile'){var c=A().clips()[A().cur()]||{};pg.innerHTML='<h3>Profil</h3><div class="it">'+esc(c.name||'El Qaisy Abdelmalik')+'<small>'+A().clips().length+' clip(s)</small></div><div class="it" id="pg-up">⬆ Importer un clip</div>';$('pg-up').onclick=function(){closePg();setTab('clips');$('up-open').click();};}
+  }
+  document.querySelectorAll('.tab').forEach(function(t){t.onclick=function(){page(t.dataset.tab)}});
+  drawer.querySelectorAll('[data-go]').forEach(function(b){b.onclick=function(){var g=b.dataset.go;
+    if(g==='upload'){closeAll();$('up-open').click();}else if(g==='share'){closeAll();$('rail-share').click();}else page(g);};});
+  /* search */
+  function runSearch(q){q=q.trim().toLowerCase();setTab('search');closeAll();pg.hidden=false;
+    var cs=A().clips(),r=[];cs.forEach(function(c,i){if(!q||((c.desc||'')+' '+(c.name||'')).toLowerCase().indexOf(q)>-1)r.push(i)});
+    pg.innerHTML='<h3>Résultats ('+r.length+')</h3>'+(r.length?r.map(function(i){var c=cs[i];return '<div class="it" data-i="'+i+'">'+esc(c.desc||'Clip '+(i+1))+'<small>'+esc(c.name||'')+'</small></div>'}).join(''):'<div class="sh-sub">Aucun résultat pour « '+esc(q)+' ».</div>');
+    pg.querySelectorAll('[data-i]').forEach(function(e){e.onclick=function(){A().play(+e.dataset.i);closePg();setTab('clips');};});}
+  $('open-search').onsubmit=function(e){e.preventDefault();runSearch($('q').value);$('q').blur();};
+  $('q').addEventListener('keydown',function(e){e.stopPropagation();});
+  /* importer: open the file picker directly (sheet still opens via upload.js) */
+  $('up-open').addEventListener('click',function(){var f=$('up-file');if(f)f.click();});
+  /* follow / citizen buttons */
+  var fl=document.querySelector('.follow');fl.onclick=function(){var on=fl.classList.toggle('on');fl.textContent=on?'Abonné':'Suivre';};
+  var pills=document.querySelectorAll('.citizen-bar .pill');
+  pills[1].onclick=function(){page('inbox');};
+  pills[2].onclick=function(){openSheet('<div class="up-head"><span>✨ Ask AI</span><button data-x>✕</button></div><div class="sh-sub">Importe un clip : l’AI propose description, musique et effets à l’étape 2.</div><div class="fx-menu"><button data-u>⬆ Importer un clip</button></div>');sheet.querySelector('[data-u]').onclick=function(){closeAll();$('up-open').click();};};
+  document.querySelectorAll('.nav-agon').forEach(function(){});
+  var fsb=document.querySelector('.fullscreen');if(fsb)fsb.onclick=function(){var e=document.documentElement;(e.requestFullscreen||function(){}).call(e);};
+  paint();
 })();
 </script>
 <script type="module" src="/upload.js"></script>
