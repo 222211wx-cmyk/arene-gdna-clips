@@ -21,7 +21,7 @@ for (const b of document.querySelectorAll('[data-mode]')) {
 }
 const setProgress = (txt, pct) => { label.textContent = txt; bar.style.width = pct + '%'; };
 
-/* ---------- Studio: 1 fichier -> 2 description (Arena AI) -> 3 publier ---------- */
+/* ---------- Studio: 1 fichier -> 2 description (AI) -> 3 publier ---------- */
 const st = { file: null, music: null, fx: { eclairage: 0, couleur: 0, cartoon: false }, ctx: {} };
 const fxCss = () => st.fx.cartoon ? 'contrast(1.35) saturate(2) brightness(1.05)' : `brightness(${1 + st.fx.eclairage / 100}) saturate(${1 + st.fx.couleur / 100})`;
 const applyFxPreview = () => { $('st-prev').style.filter = fxCss(); };
@@ -35,7 +35,7 @@ $('up-file').onchange = async (e) => {
   $('st-1').hidden = true; $('st-2').hidden = false; $('up-title').textContent = 'Description';
   $('ai-list').innerHTML = ''; $('ai-reply').textContent = 'كنشوف الفيديو…';
   st.ctx = await analyze(file).catch(() => ({}));
-  ask('');   // Arena AI already has suggestions when the user lands here
+  ask('');   // AI already has suggestions when the user lands here
 };
 
 async function analyze(file) {
@@ -54,13 +54,13 @@ async function analyze(file) {
   return { frames, duration: Math.round(d), brightness: +(br / n).toFixed(2), saturation: +(sa / n).toFixed(2), orientation: v.videoWidth >= v.videoHeight ? 'landscape' : 'portrait', hint: file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') };
 }
 
-/* ---------- Arena AI ---------- */
+/* ---------- AI ---------- */
 async function ask(prompt) {
   $('ai-reply').textContent = '…';
   try {
     const r = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, context: { ...st.ctx, description: $('st-desc').value } }) });
     const j = await r.json(); $('ai-reply').textContent = j.reply; renderAI(j.items || []);
-  } catch { $('ai-reply').textContent = 'تعذر الوصول لـ Arena AI، عاود حاول.'; }
+  } catch { $('ai-reply').textContent = 'تعذر الوصول لـ AI، عاود حاول.'; }
 }
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function renderAI(items) {

@@ -7,7 +7,7 @@ import {
   CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import fs from 'node:fs';
-import { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL } from './brand.js';
+import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
 import { ask as askAI } from './ai.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -31,7 +31,7 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((e) => { console.error(e);
 const app = express();
 app.use(express.json({ limit: '4mb' }));
 
-// Music playlist + Arena AI (work without R2)
+// Music playlist + AI (work without R2)
 app.get('/api/music', (req, res) => res.json({ tracks: searchMusic(String(req.query.q || '')) }));
 app.get('/api/music/:id/cover.svg', (req, res) => { const t = musicById(req.params.id); if (!t) return res.sendStatus(404); res.type('image/svg+xml').set('cache-control', 'public,max-age=86400').send(coverSvg(t)); });
 app.get('/api/music/:id/audio', wrap(async (req, res) => {
@@ -131,7 +131,7 @@ app.get('/api/config', (req, res) => res.json({ configured }));
 app.use('/api', api);
 app.use('/vendor/ffmpeg', express.static(nm('@ffmpeg/ffmpeg/dist/esm')));
 app.use('/vendor/core', express.static(nm('@ffmpeg/core/dist/esm')));
-const vars = { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL };
+const vars = { BRAND_NAME, TAB_LABEL, CANONICAL_URL };
 const template = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
 const attr = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const render = (extra = {}) => template.replace(/\{\{(\w+)\}\}/g, (_, k) => attr({ ...vars, OG_TITLE: BRAND_NAME, PAGE_URL: CANONICAL_URL, ...extra }[k] ?? ''));

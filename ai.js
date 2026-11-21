@@ -1,4 +1,4 @@
-// Arena AI: answers what the user asks. Uses an LLM when AI_API_KEY is set (OpenAI-compatible), else built-in rules.
+// AI: answers what the user asks. Uses an LLM when AI_API_KEY is set (OpenAI-compatible), else built-in rules.
 import { suggest } from './music.js';
 
 const has = (s, ...k) => k.some((x) => s.includes(x));
@@ -65,7 +65,7 @@ export async function ask(prompt, ctx) {
       body: JSON.stringify({
         model: process.env.AI_MODEL || 'gpt-4o-mini', response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: 'You are Arena AI inside a short-video publishing screen. Reply in Moroccan Darija (Arabic script). Look at the video frames. Return JSON {"reply": string, "texts": [string, string], "moodWords": [string]} where texts are ready-to-use descriptions/comments/persona lines matching the request, and moodWords are 3-5 English mood keywords (happy, calm, energy, cute, epic, travel, dance, night, love) for choosing music.' },
+          { role: 'system', content: 'You are AI inside a short-video publishing screen. Reply in Moroccan Darija (Arabic script). Look at the video frames. Return JSON {"reply": string, "texts": [string, string], "moodWords": [string]} where texts are ready-to-use descriptions/comments/persona lines matching the request, and moodWords are 3-5 English mood keywords (happy, calm, energy, cute, epic, travel, dance, night, love) for choosing music.' },
           { role: 'user', content: [{ type: 'text', text: `Request: ${prompt}\nCurrent description: ${ctx.description || ''}` }, ...frames] },
         ],
       }),
@@ -79,5 +79,5 @@ export async function ask(prompt, ctx) {
       out.items = [...j.texts.map((x) => ({ type: t, title: t === 'comment' ? 'تعليق جاهز' : t === 'persona' ? 'تقمص شخصية' : 'وصف جاهز', text: x, use: { description: x } })), ...base.items.filter((i) => !['description', 'comment', 'persona'].includes(i.type) || base.intent === 'all' && i.type !== t)];
     }
     return out;
-  } catch (e) { console.error('arena-ai', e.message); return base; }
+  } catch (e) { console.error('ai', e.message); return base; }
 }
