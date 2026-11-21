@@ -214,6 +214,35 @@ body{min-height:0}
 html,body{width:100vw;height:100dvh}
 .phone,.video-wrap,.video-wrap video,.video-wrap img{width:100vw;height:100dvh}
 .video-wrap,.video-wrap video,.video-wrap img{object-fit:cover}
+/* ===== SPEC (Reels reference): header 52 | Retour/Devant 40px at 8/8 | top buttons 28px at top 76 | rail right 12 bottom 160, item 62 | tabbar 64 ===== */
+:root{--hdr:52px;--btn-top:calc(env(safe-area-inset-top,0px) + 76px)}
+.topbar{height:calc(var(--hdr) + env(safe-area-inset-top,0px));min-height:calc(var(--hdr) + env(safe-area-inset-top,0px));padding:env(safe-area-inset-top,0px) 16px 0;box-sizing:border-box;pointer-events:none;z-index:50}
+.topbar>*{pointer-events:none}
+.top-left{gap:0}
+.topbar .top-title{margin-left:96px;font-size:clamp(24px,calc((100vw - 128px) / 5.7),40px);line-height:var(--hdr);height:var(--hdr);pointer-events:auto}
+.topbar .top-left .btn-circle{position:absolute;left:16px;top:var(--btn-top);pointer-events:auto}
+.topbar .top-right{position:absolute;right:16px;top:var(--btn-top);gap:24px;pointer-events:auto}
+.topbar .btn-circle,.topbar .top-right .btn-circle{width:28px;height:28px;min-width:28px;min-height:28px;position:relative}
+.topbar .top-left .btn-circle{position:absolute}
+.topbar .btn-circle::after{content:"";position:absolute;inset:-8px}
+.topbar .btn-circle svg,.topbar .top-right .btn-circle svg{width:28px;height:28px}
+.hist{position:absolute;z-index:60;top:calc(env(safe-area-inset-top,0px) + 8px);left:8px;display:flex;gap:8px}
+.hist-btn{width:40px;height:40px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.hist-btn svg{width:24px;height:24px;display:block}
+.up-open{top:calc(var(--btn-top) + 28px + 8px);left:12px}
+.rail{right:12px;padding-right:0;gap:18px;bottom:calc(160px + env(safe-area-inset-bottom))}
+.rail-item{width:48px;height:62px;min-width:48px;gap:2px;justify-content:center;position:relative}
+.rail-item::after{content:"";position:absolute;inset:0 -6px}
+.rail-icon,.rail-item>span[style]{width:30px!important;height:30px!important;min-width:30px;min-height:30px}
+.rail-icon svg{width:30px;height:30px}
+.rail-item>span[style]{font-size:20px!important;line-height:30px}
+.rail-count{font-size:16px;line-height:16px;font-weight:700}
+.tabbar{height:calc(64px + env(safe-area-inset-bottom));min-height:calc(64px + env(safe-area-inset-bottom))}
+.tab{min-height:64px}
+.tab svg{width:28px;height:28px}
+.citizen-bar{bottom:calc(64px + 8px + env(safe-area-inset-bottom))}
+.info{bottom:calc(64px + 64px + env(safe-area-inset-bottom));right:calc(12px + 48px + 12px)}
+.sh-toast{bottom:calc(64px + 24px + env(safe-area-inset-bottom))}
 </style>
 </head>
 <body>
@@ -234,7 +263,10 @@ html,body{width:100vw;height:100dvh}
       <button class="btn-circle" aria-label="Plus"><svg viewBox="0 0 24 24" fill="#fff"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
     </div>
   </div>
-  <div class="retour">Retour</div>
+  <div class="hist">
+    <button class="hist-btn" id="hist-back" aria-label="Retour" onclick="history.back()"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="hist-btn" id="hist-forward" aria-label="Devant" onclick="history.forward()"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
   <button class="play" onclick="document.getElementById('vid').play();document.querySelector('.video-wrap img').style.display='none';this.style.display='none'">
     <svg width="26" height="26" viewBox="0 0 24 24" fill="#000"><path d="M8 5v14l11-7z"/></svg>
   </button>
