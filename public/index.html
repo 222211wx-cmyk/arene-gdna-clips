@@ -255,9 +255,9 @@ html,body{width:100vw;height:100dvh}
 .search-field svg{width:20px;height:20px;flex:none}
 .search-field span{opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* header layout: Retour left 8 | title centered | Devant right 8 ; row 2: menu -6- search -6- dots */
-.hist{left:0;right:0;justify-content:space-between;padding:0 8px;pointer-events:none}
+.hist{left:0;right:0;justify-content:space-between;padding:0 38px;pointer-events:none}
 .hist .hist-btn{pointer-events:auto}
-.topbar .top-title{position:absolute;top:0;left:56px;right:56px;margin:0;justify-content:center;text-align:center;font-size:clamp(20px,calc((100vw - 112px) / 5.7),40px)}
+.topbar .top-title{position:absolute;top:0;left:86px;right:86px;margin:0;justify-content:center;text-align:center;font-size:clamp(20px,calc((100vw - 212px) / 5.7),40px)}
 .search-field{left:52px;right:52px}
 /* short screens: keep the rail clear of the top buttons (position/scale only) */
 @media(max-height:660px){.rail{bottom:calc(120px + env(safe-area-inset-bottom));transform:scale(.85);transform-origin:right bottom}}
@@ -285,7 +285,7 @@ html,body{width:100vw;height:100dvh}
 /* desktop-site mode fix (only when html.fx-desk is set by the script in <head>) */
 html.fx-desk .phone{position:fixed!important;left:0!important;top:0!important;right:auto!important;bottom:auto!important;inset:0 auto auto 0!important;width:var(--fxw)!important;height:var(--fxh)!important;max-width:none!important;max-height:none!important;transform:scale(var(--fxs));transform-origin:0 0}
 html.fx-desk .video-wrap,html.fx-desk .video-wrap video,html.fx-desk .video-wrap img{width:var(--fxw)!important;height:var(--fxh)!important}
-html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 112px) / 5.7),40px)}
+html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) / 5.7),40px)}
 </style>
 </head>
 <body>
