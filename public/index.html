@@ -471,11 +471,12 @@ html,body{width:100vw;height:100dvh}
   function bindCm(){$('fx-cmf').onsubmit=function(e){e.preventDefault();var v=$('fx-cmi').value.trim();if(!v)return;st().cm.push(v);save();paint();openCm();};}
   cmb.onclick=openCm;
   /* options menu (dots) */
-  function openMore(){openSheet('<div class="up-head"><span>Options</span><button data-x>✕</button></div><div class="fx-menu"><button data-a="share">Partager</button><button data-a="copy">Copier le lien</button><button data-a="report">Signaler</button></div>');
+  function openMore(){openSheet('<div class="up-head"><span>Options</span><button data-x>✕</button></div><div class="fx-menu"><button data-a="share">Partager</button><button data-a="copy">Copier le lien</button><button data-a="save">'+(st().save?'Enregistré ✓ (retirer)':'Enregistrer')+'</button><button data-a="report">Signaler</button></div>');
     sheet.querySelectorAll('[data-a]').forEach(function(b){b.onclick=function(){var a=b.dataset.a;
       if(a==='share'){closeAll();$('rail-share').click();}
       else if(a==='copy'){var u=location.origin+location.pathname;var done=function(){toast('تنسخ الرابط ✓')};
         if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(u).then(done,function(){fb(u);done()});else{fb(u);done();}closeAll();}
+      else if(a==='save'){closeAll();$('r-save').click();}
       else{closeAll();toast('تسجل الإبلاغ، شكرا');}};});}
   function fb(t){var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}a.remove();}
   $('b-more').onclick=openMore;$('r-more').onclick=openMore;
