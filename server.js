@@ -6,6 +6,8 @@ import {
   S3Client, CreateMultipartUploadCommand, UploadPartCommand, ListPartsCommand,
   CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, GetObjectCommand,
 } from '@aws-sdk/client-s3';
+import fs from 'node:fs';
+import { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,8 +97,13 @@ app.get('/api/config', (req, res) => res.json({ configured }));
 app.use('/api', api);
 app.use('/vendor/ffmpeg', express.static(nm('@ffmpeg/ffmpeg/dist/esm')));
 app.use('/vendor/core', express.static(nm('@ffmpeg/core/dist/esm')));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use((req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+const vars = { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL };
+const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
+  .replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+const sendIndex = (req, res) => res.type('html').send(indexHtml);
+app.get(['/', '/index.html'], sendIndex);
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+app.use(sendIndex);
 
 const port = process.env.PORT || 8080;
 app.listen(port, '0.0.0.0', () => console.log(`listening on ${port}, R2 ${configured ? 'configured' : 'NOT configured'}`));
