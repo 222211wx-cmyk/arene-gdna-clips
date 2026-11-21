@@ -285,13 +285,18 @@ const idbPut = (k, v) => idbOp('readwrite', (s) => s.put(v, k));
 const idbDel = (k) => idbOp('readwrite', (s) => s.delete(k));
 
 /* ---------- Clips page shows the compressed clip from R2 ---------- */
+const announce = (key, meta) => document.dispatchEvent(new CustomEvent('clip', { detail: { id: key.slice(6, -4), title: (meta?.description || '').split('\n')[0] } }));
 async function loadLatestClip() {
   try {
-    const { clips } = await api('/clips');
-    if (!clips.length) return;
-    const m = clips[0].meta;
+    const deep = (location.pathname.match(/^\/c\/([\w.-]+)/) || [])[1];
+    const one = deep && deep !== 'demo' && !deep.startsWith('u-') ? await api('/clips/' + encodeURIComponent(deep)).catch(() => null) : null;
+    if (deep && deep !== 'demo' && !one && !deep.startsWith('u-')) return;   // unknown shared clip: never show a different one
+    const c = one || (await api('/clips')).clips[0];
+    if (!c) return;
+    const m = c.meta;
     if (m) { if (m.description) document.querySelector('.desc').textContent = m.description; if (m.musicId) { const t = (await api('/music?q=')).tracks.find((x) => x.id === m.musicId); if (t) document.querySelector('.music').textContent = `♫ ${t.name} - ${t.artist}`; } }
-    const v = $('vid'); v.src = clips[0].url; v.load();
+    announce(c.key, m);
+    const v = $('vid'); v.src = c.url; v.load();
     const img = document.querySelector('.video-wrap img'); if (img) img.style.display = 'none';
   } catch { /* R2 not configured yet: keep the placeholder */ }
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   S3Client, CreateMultipartUploadCommand, UploadPartCommand, ListPartsCommand,
-  CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand,
+  CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import fs from 'node:fs';
 import { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL } from './brand.js';
@@ -106,11 +106,21 @@ api.post('/upload/abort', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+const meta = async (k) => { try { const g = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: `meta/${k.slice(6, -4)}.json` })); return JSON.parse(await g.Body.transformToString()); } catch { return null; } };
+const clipId = (id) => typeof id === 'string' && /^[\w.-]+$/.test(id) && id.length < 80;
+
+// One clip by id (deep link /c/:id).
+api.get('/clips/:id', wrap(async (req, res) => {
+  if (!clipId(req.params.id)) return res.status(400).json({ error: 'bad request' });
+  const key = `clips/${req.params.id}.mp4`;
+  try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })); } catch { return res.status(404).json({ error: 'clip introuvable' }); }
+  res.json({ key, meta: await meta(key), url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 }) });
+}));
+
 // Newest compressed clips, each with a short-lived playback URL.
 api.get('/clips', wrap(async (req, res) => {
   const r = await s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: 'clips/' }));
   const items = (r.Contents || []).filter((o) => o.Key.endsWith('.mp4')).sort((a, b) => b.LastModified - a.LastModified).slice(0, 20);
-  const meta = async (k) => { try { const g = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: `meta/${k.slice(6, -4)}.json` })); return JSON.parse(await g.Body.transformToString()); } catch { return null; } };
   res.json({ clips: await Promise.all(items.map(async (o) => ({
     key: o.Key, size: o.Size, modified: o.LastModified, meta: await meta(o.Key),
     url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: o.Key }), { expiresIn: 3600 }),
@@ -122,9 +132,17 @@ app.use('/api', api);
 app.use('/vendor/ffmpeg', express.static(nm('@ffmpeg/ffmpeg/dist/esm')));
 app.use('/vendor/core', express.static(nm('@ffmpeg/core/dist/esm')));
 const vars = { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL };
-const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
-  .replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+const template = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+const attr = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const render = (extra = {}) => template.replace(/\{\{(\w+)\}\}/g, (_, k) => attr({ ...vars, OG_TITLE: BRAND_NAME, PAGE_URL: CANONICAL_URL, ...extra }[k] ?? ''));
+const indexHtml = render();
 const sendIndex = (req, res) => res.type('html').send(indexHtml);
+// Shared clip link: same app, with the clip's title in the link preview.
+app.get('/c/:id', async (req, res) => {
+  const id = req.params.id; let title = '';
+  if (configured && clipId(id)) { const m = await meta(`clips/${id}.mp4`).catch(() => null); title = (m?.description || '').split('\n')[0].slice(0, 90); }
+  res.type('html').send(render({ OG_TITLE: title ? `${title} - ${BRAND_NAME}` : BRAND_NAME, PAGE_URL: `${CANONICAL_URL}/c/${id}` }));
+});
 app.get(['/', '/index.html'], sendIndex);
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 app.use(sendIndex);
