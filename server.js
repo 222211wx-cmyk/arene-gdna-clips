@@ -4,10 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   S3Client, CreateMultipartUploadCommand, UploadPartCommand, ListPartsCommand,
-  CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, GetObjectCommand,
+  CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import fs from 'node:fs';
 import { BRAND_NAME, PARENT_BRAND, PARENT_URL, TAB_LABEL, CANONICAL_URL } from './brand.js';
+import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
+import { ask as askAI } from './ai.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,12 +26,23 @@ const PART_SIZE = 5 * 1024 * 1024;           // S3/R2 minimum part size (except 
 const MAX_SIZE = 2 * 1024 * 1024 * 1024;     // compressed upload cap
 const keyOk = (k) => typeof k === 'string' && /^clips\/[\w.-]+\.mp4$/.test(k);
 
+const wrap = (fn) => (req, res) => fn(req, res).catch((e) => { console.error(e); res.status(500).json({ error: e.message }); });
+
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '4mb' }));
+
+// Music playlist + Arena AI (work without R2)
+app.get('/api/music', (req, res) => res.json({ tracks: searchMusic(String(req.query.q || '')) }));
+app.get('/api/music/:id/cover.svg', (req, res) => { const t = musicById(req.params.id); if (!t) return res.sendStatus(404); res.type('image/svg+xml').set('cache-control', 'public,max-age=86400').send(coverSvg(t)); });
+app.get('/api/music/:id/audio', wrap(async (req, res) => {
+  const t = musicById(req.params.id); if (!t) return res.sendStatus(404);
+  const r = await fetch(t.src); if (!r.ok) return res.sendStatus(502);
+  res.type('audio/mpeg').set('cache-control', 'public,max-age=86400').send(Buffer.from(await r.arrayBuffer()));
+}));
+app.post('/api/ai', wrap(async (req, res) => res.json(await askAI(String(req.body.prompt || '').slice(0, 500), req.body.context || {}))));
 const api = express.Router();
 api.use((req, res, next) => configured ? next()
   : res.status(503).json({ error: 'R2 non configuré: R2_ACCOUNT_ID (ou R2_ENDPOINT), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET' }));
-const wrap = (fn) => (req, res) => fn(req, res).catch((e) => { console.error(e); res.status(500).json({ error: e.message }); });
 
 api.post('/upload/init', wrap(async (req, res) => {
   const size = Number(req.body.size);
@@ -76,6 +89,16 @@ api.post('/upload/complete', wrap(async (req, res) => {
   res.json({ key });
 }));
 
+// Record description + MusicId with the published clip.
+api.post('/publish', wrap(async (req, res) => {
+  const { key, description = '', musicId = null } = req.body;
+  if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
+  if (musicId && !musicById(musicId)) return res.status(400).json({ error: 'musique inconnue' });
+  const meta = { key, description: String(description).slice(0, 2200), musicId, publishedAt: new Date().toISOString() };
+  await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: `meta/${key.slice(6, -4)}.json`, Body: JSON.stringify(meta), ContentType: 'application/json' }));
+  res.json(meta);
+}));
+
 api.post('/upload/abort', wrap(async (req, res) => {
   const { key, uploadId } = req.body;
   if (!keyOk(key) || !uploadId) return res.status(400).json({ error: 'bad request' });
@@ -86,9 +109,10 @@ api.post('/upload/abort', wrap(async (req, res) => {
 // Newest compressed clips, each with a short-lived playback URL.
 api.get('/clips', wrap(async (req, res) => {
   const r = await s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: 'clips/' }));
-  const items = (r.Contents || []).sort((a, b) => b.LastModified - a.LastModified).slice(0, 20);
+  const items = (r.Contents || []).filter((o) => o.Key.endsWith('.mp4')).sort((a, b) => b.LastModified - a.LastModified).slice(0, 20);
+  const meta = async (k) => { try { const g = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: `meta/${k.slice(6, -4)}.json` })); return JSON.parse(await g.Body.transformToString()); } catch { return null; } };
   res.json({ clips: await Promise.all(items.map(async (o) => ({
-    key: o.Key, size: o.Size, modified: o.LastModified,
+    key: o.Key, size: o.Size, modified: o.LastModified, meta: await meta(o.Key),
     url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: o.Key }), { expiresIn: 3600 }),
   }))) });
 }));
