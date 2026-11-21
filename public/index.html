@@ -175,6 +175,19 @@ body{min-height:0}
 .info{bottom:calc(120px + env(safe-area-inset-bottom))}
 .rail{bottom:calc(120px + env(safe-area-inset-bottom))}
 .sh-toast{bottom:calc(120px + env(safe-area-inset-bottom))}
+/* Header + rail sizes (Reels) */
+.topbar{align-items:center;gap:8px}
+.top-left{gap:10px;align-items:center}
+.btn-circle,.top-right .btn-circle{width:44px;height:44px;min-width:44px;min-height:44px;padding:0;background:transparent;backdrop-filter:none;display:flex;align-items:center;justify-content:center}
+.btn-circle svg,.top-right .btn-circle svg{width:28px;height:28px;display:block}
+.top-title{font-size:28px;font-weight:700;line-height:44px;height:44px;display:flex;align-items:center;letter-spacing:0;white-space:nowrap}
+.top-right{gap:4px}
+.rail{gap:22px}
+.rail-item>span[style]{background:transparent!important;width:40px;height:24px;font-size:20px!important}
+.rail-item{gap:4px;min-width:56px}
+.rail-icon{width:40px;height:40px;min-width:40px;min-height:40px;background:transparent;backdrop-filter:none}
+.rail-icon svg{width:32px;height:32px}
+.rail-count{display:block!important;font-size:14px;font-weight:600;color:#fff;line-height:1}
 .video-wrap.slide-up{animation:slu .28s ease-out}.video-wrap.slide-down{animation:sld .28s ease-out}
 @keyframes slu{from{transform:translateY(100%)}to{transform:none}}
 @keyframes sld{from{transform:translateY(-100%)}to{transform:none}}
@@ -190,12 +203,12 @@ body{min-height:0}
   <div class="gradient-bottom"></div>
   <div class="topbar">
     <div class="top-left">
-      <button class="btn-circle">≡</button>
+      <button class="btn-circle" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
       <div class="top-title">{{BRAND_NAME}}</div>
     </div>
     <div class="top-right">
-      <button class="btn-circle">⌕</button>
-      <button class="btn-circle">…</button>
+      <button class="btn-circle" id="open-search" aria-label="Recherche"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
+      <button class="btn-circle" aria-label="Plus"><svg viewBox="0 0 24 24" fill="#fff"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
     </div>
   </div>
   <div class="retour">Retour</div>
@@ -205,7 +218,7 @@ body{min-height:0}
   <div class="rail">
     <button class="rail-item"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9C1 8 3 4.5 6.5 4.5c2 0 3.5 1 4.5 2.5 1-1.5 2.5-2.5 4.5-2.5C19 4.5 21 8 19.5 12c-2.5 4.5-7.5 9-7.5 9z"/></svg></span><span class="rail-label">Like</span><span class="rail-count">3</span></button>
     <button class="rail-item"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 12a8 8 0 0 1-11 7.5L3 21l1.5-4A8 8 0 1 1 21 12z"/></svg></span><span class="rail-label">Comment</span><span class="rail-count">0</span></button>
-    <button class="rail-item" id="rail-share" aria-label="Partager"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></span><span class="rail-label">Partager</span><span class="rail-count">1</span></button>
+    <button class="rail-item" id="rail-share" aria-label="Partager"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M14 4l7 7-7 7M21 11H9a6 6 0 0 0-6 6v2"/></svg></span><span class="rail-label">Partager</span><span class="rail-count">1</span></button>
     <button class="rail-item"><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M6 3h12v18l-6-4-6 4z"/></svg></span><span class="rail-label">Save</span><span class="rail-count">0</span></button>
     <button class="rail-item"><span style="font-size:22px">•••</span></button>
   </div>
