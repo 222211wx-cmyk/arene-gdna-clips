@@ -32,7 +32,7 @@ export function ruleBased(prompt, ctx = {}) {
   const want = (k) => intent === 'all' || intent === k;
 
   if (want('description')) {
-    add({ type: 'description', title: 'وصف جاهز', text: `${scene} ${land ? 'بالعرض' : 'بالطول'} 🎬 ${base ? base + ' ' : ''}#ArenaClips #GDNAArena`, use: { description: `${scene} ${land ? 'بالعرض' : 'بالطول'} 🎬 ${base ? base + ' ' : ''}#ArenaClips #GDNAArena` } });
+    add({ type: 'description', title: 'وصف جاهز', text: `${scene} ${land ? 'بالعرض' : 'بالطول'} 🎬 ${base}`, use: { description: `${scene} ${land ? 'بالعرض' : 'بالطول'} 🎬 ${base}` } });
     add({ type: 'description', title: 'وصف قصير', text: `${scene} ✨ شنو كتقولو؟`, use: { description: `${scene} ✨ شنو كتقولو؟` } });
   }
   if (want('comment')) {
