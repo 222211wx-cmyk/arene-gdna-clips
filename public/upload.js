@@ -1,24 +1,16 @@
-// Compress in the browser (ffmpeg.wasm, H.264/AAC MP4) -> upload ONLY the compressed file to R2
+// Upload the original file straight to R2
 // with 20 parallel presigned multipart parts, resumable across reloads / network loss.
-import { FFmpeg } from '/vendor/ffmpeg/index.js';
 
-const MODES = {
-  normal: { vb: 1000, ab: 96, long: 1280, short: 720 },   // 720p, 1 Mbps
-  powder: { vb: 500, ab: 64, long: 854, short: 480 },     // 480p, 500 kbps
-};
 const THREADS = 20;
 const $ = (id) => document.getElementById(id);
 const mb = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
 const originals = new Map();   // clip key -> original File (this device, this session only)
-let mode = 'normal', busy = false, ffmpeg = null;
+let busy = false;
 
 /* ---------- UI ---------- */
 const sheet = $('up-sheet'), bar = $('up-bar'), label = $('up-label'), result = $('up-result');
 $('up-open').onclick = () => { sheet.hidden = false; };
 $('up-close').onclick = () => { if (!busy) sheet.hidden = true; };
-for (const b of document.querySelectorAll('[data-mode]')) {
-  b.onclick = () => { if (busy) return; mode = b.dataset.mode; document.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x === b)); };
-}
 const setProgress = (txt, pct) => { label.textContent = txt; bar.style.width = pct + '%'; };
 
 /* ---------- Studio: 1 fichier -> 2 description (AI) -> 3 publier ---------- */
@@ -140,19 +132,12 @@ $('st-pub').onclick = async () => {
     const cfg = await fetch('/api/config').then((r) => r.json());
     if (!cfg.configured) throw new Error('R2 غير مهيأ في السيرفر (R2_* variables)');
     const music = st.music, fx = { ...st.fx }, description = $('st-desc').value;
-    const fp = `${file.name}|${file.size}|${file.lastModified}|${mode}|${music ? music.id : '-'}|${JSON.stringify(fx)}`;
-    let blob = await idbGet(fp);
-    if (blob) setProgress('تم الضغط من قبل، كنكمل الرفع…', 100);
-    else {
-      blob = await compress(file, MODES[mode], { music, fx });
-      await idbPut(fp, blob).catch(() => {});
-    }
-    const key = await upload(blob, fp);
-    await idbDel(fp).catch(() => {});
+    const fp = `${file.name}|${file.size}|${file.lastModified}`;
+    setProgress('جاري الرفع... 0%', 0);
+    const key = await upload(file, fp);   // original file, uploaded directly, no browser compression
     originals.set(key, file);
     await api('/publish', { key, description, musicId: music ? music.id : null });
-    const saved = Math.max(0, Math.round((1 - blob.size / file.size) * 100));
-    result.innerHTML = `<div>تم النشر ✅ قبل: ${mb(file.size)} MB -> من بعد: ${mb(blob.size)} MB | وفرتي ${saved}%${music ? ' | ♫ ' + esc(music.name) : ''}</div>`;
+    result.innerHTML = `<div>تم النشر ✅ (${mb(file.size)} MB)${music ? ' | ♫ ' + esc(music.name) : ''}</div>`;
     const a = document.createElement('a');
     a.className = 'up-dl'; a.textContent = 'تحميل الأصلي'; a.href = URL.createObjectURL(file); a.download = file.name;
     result.appendChild(a);
@@ -163,53 +148,6 @@ $('st-pub').onclick = async () => {
     setProgress('❌ ' + err.message + ' — ضغط Publier باش يكمل', 0);
   } finally { busy = false; $('st-pub').disabled = false; }
 };
-
-/* ---------- compression ---------- */
-async function getFFmpeg() {
-  if (ffmpeg) return ffmpeg;
-  const f = new FFmpeg();
-  await f.load({ coreURL: location.origin + '/vendor/core/ffmpeg-core.js', wasmURL: location.origin + '/vendor/core/ffmpeg-core.wasm' });
-  return (ffmpeg = f);
-}
-
-async function compress(file, m, { music = null, fx = {} } = {}) {
-  setProgress('كيضغط... بودرة ⏳ 0%', 0);
-  const f = await getFFmpeg();
-  const onProgress = ({ progress }) => {
-    const p = Math.max(0, Math.min(100, Math.round(progress * 100)));
-    setProgress(`كيضغط... بودرة ⏳ ${p}%`, p);
-  };
-  f.on('progress', onProgress);
-  try {
-    // Never upscale: long side capped at m.long, short side at m.short, whichever way the video is turned.
-    let vf = `scale='if(gte(iw,ih),min(${m.long},iw),min(${m.short},iw))':'if(gte(iw,ih),min(${m.short},ih),min(${m.long},ih))':force_original_aspect_ratio=decrease:force_divisible_by=2`;
-    if (fx.cartoon) vf += `,eq=saturation=1.9:contrast=1.25,lutrgb=r='trunc(val/40)*40+20':g='trunc(val/40)*40+20':b='trunc(val/40)*40+20'`;
-    else if (fx.eclairage || fx.couleur) vf += `,eq=brightness=${(fx.eclairage / 200).toFixed(3)}:saturation=${(1 + fx.couleur / 100).toFixed(2)}`;
-    if (music) {
-      setProgress('كنجيب الموسيقى…', 0);
-      const buf = await fetch(`/api/music/${music.id}/audio`).then((r) => { if (!r.ok) throw new Error('الموسيقى ما تحملاتش'); return r.arrayBuffer(); });
-      await f.writeFile('music.mp3', new Uint8Array(buf));
-    }
-    await f.createDir('/in').catch(() => {});
-    // Fixed ASCII name: any container/extension/odd characters in the original name work. ffmpeg probes content, not the name.
-    await f.mount('WORKERFS', { files: [new File([file], 'input')] }, '/in');   // read the big file lazily, no copy in RAM
-    const code = await f.exec([
-      '-i', '/in/input', ...(music ? ['-stream_loop', '-1', '-i', 'music.mp3', '-map', '0:v:0', '-map', '1:a:0', '-shortest'] : ['-map', '0:v:0', '-map', '0:a:0?']), '-sn', '-dn', '-vf', vf, '-r', '30',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', `${m.vb}k`, '-maxrate', `${Math.round(m.vb * 1.2)}k`, '-bufsize', `${m.vb * 2}k`,
-      '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', `${m.ab}k`, '-movflags', '+faststart', '-y', 'out.mp4',
-    ]);
-    if (code !== 0) throw new Error('فشل الضغط (ffmpeg ' + code + ')');
-    const data = await f.readFile('out.mp4');
-    await f.deleteFile('out.mp4').catch(() => {});
-    if (music) await f.deleteFile('music.mp3').catch(() => {});
-    setProgress('كيضغط... بودرة ⏳ 100%', 100);
-    return new Blob([data], { type: 'video/mp4' });
-  } finally {
-    f.off('progress', onProgress);
-    await f.unmount('/in').catch(() => {});
-    await f.deleteDir('/in').catch(() => {});
-  }
-}
 
 /* ---------- resumable multipart upload ---------- */
 const api = async (path, body) => {
@@ -238,7 +176,7 @@ async function upload(blob, fp) {
   const sent = new Array(total + 1).fill(0);           // bytes sent per part (live)
   const partLen = (n) => Math.min(s.partSize, blob.size - (n - 1) * s.partSize);
   for (const n of done) sent[n] = partLen(n);
-  const render = () => { const t = sent.reduce((a, b) => a + b, 0); const p = Math.min(100, Math.floor((t / blob.size) * 100)); setProgress(`كيرفع ⬆️ ${p}% (${mb(t)}/${mb(blob.size)} MB)`, p); };
+  const render = () => { const t = sent.reduce((a, b) => a + b, 0); const p = Math.min(100, Math.floor((t / blob.size) * 100)); setProgress(`جاري الرفع... ${p}% (${mb(t)}/${mb(blob.size)} MB)`, p); };
   render();
 
   const queue = []; for (let n = 1; n <= total; n++) if (!done.has(n)) queue.push(n);
@@ -277,13 +215,6 @@ function putPart(url, chunk, onBytes) {
     x.send(chunk);
   });
 }
-
-/* ---------- IndexedDB: keep the compressed blob so a retry doesn't re-compress ---------- */
-const idb = () => new Promise((res, rej) => { const r = indexedDB.open('clips', 1); r.onupgradeneeded = () => r.result.createObjectStore('blobs'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-const idbOp = async (mode, fn) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('blobs', mode); const rq = fn(t.objectStore('blobs')); t.oncomplete = () => res(rq.result); t.onerror = () => rej(t.error); }); };
-const idbGet = (k) => idbOp('readonly', (s) => s.get(k)).catch(() => null);
-const idbPut = (k, v) => idbOp('readwrite', (s) => s.put(v, k));
-const idbDel = (k) => idbOp('readwrite', (s) => s.delete(k));
 
 /* ---------- Clips page shows the compressed clip from R2 ---------- */
 const announce = (key, meta) => document.dispatchEvent(new CustomEvent('clip', { detail: { id: key.slice(6, -4), title: (meta?.description || '').split('\n')[0] } }));
