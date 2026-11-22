@@ -117,6 +117,18 @@ api.get('/clips/:id', wrap(async (req, res) => {
   res.json({ key, meta: await meta(key), url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 }) });
 }));
 
+// Download: redirect to a short-lived signed R2 URL (bytes never pass through this server).
+api.get('/clips/:id/download', wrap(async (req, res) => {
+  if (!clipId(req.params.id)) return res.status(400).json({ error: 'bad request' });
+  const key = `clips/${req.params.id}.mp4`;
+  try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })); } catch { return res.status(404).json({ error: 'clip introuvable' }); }
+  const url = await getSignedUrl(s3, new GetObjectCommand({
+    Bucket: R2_BUCKET, Key: key,
+    ResponseContentDisposition: `attachment; filename="${req.params.id}.mp4"`, ResponseContentType: 'video/mp4',
+  }), { expiresIn: 300 });
+  res.set('Cache-Control', 'no-store').redirect(302, url);
+}));
+
 // Newest compressed clips, each with a short-lived playback URL.
 api.get('/clips', wrap(async (req, res) => {
   const r = await s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: 'clips/' }));
