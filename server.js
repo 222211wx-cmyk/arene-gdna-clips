@@ -14,7 +14,24 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nm = (p) => path.join(__dirname, 'node_modules', p);
-const { R2_ACCOUNT_ID, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET } = process.env;
+const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = process.env;
+// Tolerate misconfigured vars: bucket must be a bare name, endpoint a bare origin.
+const rawBucket = (process.env.R2_BUCKET_NAME || process.env.R2_BUCKET || '').trim();
+let R2_ENDPOINT = (process.env.R2_ENDPOINT || '').trim();
+let R2_BUCKET = rawBucket;
+if (/[/:]/.test(rawBucket)) {
+  let name = '';
+  try {
+    const u = new URL(/^https?:\/\//i.test(rawBucket) ? rawBucket : `https://${rawBucket}`);
+    name = u.pathname.split('/').filter(Boolean)[0] || '';
+    if (!R2_ENDPOINT && /^https?:\/\//i.test(rawBucket)) R2_ENDPOINT = u.origin;
+  } catch { name = rawBucket.split('/').filter(Boolean).pop() || ''; }
+  console.warn(`[r2] R2_BUCKET_NAME contained a URL or '/': using bucket "${name || '(none)'}". Set it to the bucket name only (e.g. arena-clips).`);
+  R2_BUCKET = name;
+}
+if (/^https?:\/\//i.test(R2_ENDPOINT)) {
+  try { const o = new URL(R2_ENDPOINT); if (o.pathname !== '/' ) { console.warn('[r2] R2_ENDPOINT had a path; using origin only.'); R2_ENDPOINT = o.origin; } } catch {}
+}
 const endpoint = R2_ENDPOINT || (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : '');
 const configured = !!(endpoint && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET);
 const s3 = configured && new S3Client({
