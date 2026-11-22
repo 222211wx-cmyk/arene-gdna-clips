@@ -191,9 +191,10 @@ async function compress(file, m, { music = null, fx = {} } = {}) {
       await f.writeFile('music.mp3', new Uint8Array(buf));
     }
     await f.createDir('/in').catch(() => {});
-    await f.mount('WORKERFS', { files: [file] }, '/in');   // read the big file lazily, no 200 MB copy in RAM
+    // Fixed ASCII name: any container/extension/odd characters in the original name work. ffmpeg probes content, not the name.
+    await f.mount('WORKERFS', { files: [new File([file], 'input')] }, '/in');   // read the big file lazily, no copy in RAM
     const code = await f.exec([
-      '-i', `/in/${file.name}`, ...(music ? ['-stream_loop', '-1', '-i', 'music.mp3', '-map', '0:v:0', '-map', '1:a:0', '-shortest'] : []), '-vf', vf, '-r', '30',
+      '-i', '/in/input', ...(music ? ['-stream_loop', '-1', '-i', 'music.mp3', '-map', '0:v:0', '-map', '1:a:0', '-shortest'] : ['-map', '0:v:0', '-map', '0:a:0?']), '-sn', '-dn', '-vf', vf, '-r', '30',
       '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', `${m.vb}k`, '-maxrate', `${Math.round(m.vb * 1.2)}k`, '-bufsize', `${m.vb * 2}k`,
       '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', `${m.ab}k`, '-movflags', '+faststart', '-y', 'out.mp4',
     ]);
