@@ -426,7 +426,7 @@ html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) /
   var v=document.getElementById('vid'),img=document.querySelector('.video-wrap img'),pl=document.querySelector('.play'),wrap=document.querySelector('.video-wrap');
   var clips=[{url:v.src,desc:document.querySelector('.desc').textContent,name:document.querySelector('.user-name').textContent}],i=0;
   fetch('/api/clips').then(function(r){return r.ok?r.json():null}).then(function(d){
-    if(d&&d.clips&&d.clips.length){clips=d.clips.map(function(c){var m=c.meta||{};return{url:c.url,desc:m.description||'',name:m.author||m.name||document.querySelector('.user-name').textContent};});i=0;show(0);}
+    if(d&&d.clips&&d.clips.length){clips=d.clips.map(function(c){var m=c.meta||{};return{key:c.key,url:c.url,desc:m.description||'',name:m.author||m.name||document.querySelector('.user-name').textContent};});i=0;show(0);}
   }).catch(function(){});
   function show(dir){
     var c=clips[i];v.src=c.url;v.load();img.style.display='none';pl.style.display='none';
@@ -484,7 +484,7 @@ html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) /
       if(a==='share'){closeAll();$('rail-share').click();}
       else if(a==='copy'){var u=location.origin+location.pathname;var done=function(){toast('تنسخ الرابط ✓')};
         if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(u).then(done,function(){fb(u);done()});else{fb(u);done();}closeAll();}
-      else if(a==='save'){closeAll();$('r-save').click();}
+      else if(a==='save'){var was=!!st().save;closeAll();$('r-save').click();var ck=A().clips()[A().cur()];if(!was&&ck&&ck.key){var m=/^clips\/([\w.-]+)\.mp4$/.exec(ck.key);if(m)location.href='/api/clips/'+m[1]+'/download';}}
       else{closeAll();toast('تسجل الإبلاغ، شكرا');}};});}
   function fb(t){var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy')}catch(e){}a.remove();}
   $('b-more').onclick=openMore;$('r-more').onclick=openMore;
