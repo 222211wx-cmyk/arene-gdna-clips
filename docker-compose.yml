@@ -1,7 +1,12 @@
-# Local stand-in for Cloudflare R2 (S3 API) used only for development.
+# Local stand-ins for Cloudflare R2 (S3 API) and Railway Postgres, used only for development.
+# DATABASE_URL=postgres://dev:dev@localhost:5432/clips
 services:
   minio:
     image: ghcr.io/coollabsio/minio:latest
     command: server /data --console-address ":9001"
     environment: { MINIO_ROOT_USER: dev, MINIO_ROOT_PASSWORD: devdevdev }
     ports: ["9000:9000"]
+  postgres:
+    image: postgres:17
+    environment: { POSTGRES_USER: dev, POSTGRES_PASSWORD: dev, POSTGRES_DB: clips }
+    ports: ["5432:5432"]

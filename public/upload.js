@@ -143,10 +143,12 @@ $('st-pub').onclick = async () => {
     setProgress('Envoi… 0%', 0);
     const key = await upload(file, fp);   // direct to R2 (presigned), never through this server
     originals.set(key, file);
+    setProgress('Miniature…', 100);
+    const poster = await uploadPoster(file, key);
     setProgress('Publication…', 100);
     const rec = await api('/publish', {
       key, title: titleOf(file), description: $('st-desc').value, comment: $('st-comment').value,
-      musicId: music ? music.id : null, enhancement: { ...st.fx },
+      musicId: music ? music.id : null, enhancement: { ...st.fx }, poster,
     });
     setProgress('✅ Publié', 100);
     result.innerHTML = `<div>Publié ✅ ${esc(rec.title)} (${mb(file.size)} MB)${music ? ' | ♫ ' + esc(music.name) : ''}</div>`;
@@ -160,6 +162,24 @@ $('st-pub').onclick = async () => {
     setProgress('❌ ' + err.message + ' — appuyez sur Publier pour réessayer', 0);
   } finally { busy = false; $('st-pub').disabled = false; }
 };
+
+/* ---------- poster: first good frame as a small jpg, uploaded next to the clip (failure is not fatal) ---------- */
+async function uploadPoster(file, key) {
+  try {
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = URL.createObjectURL(file);
+    await new Promise((ok, ko) => { v.onloadeddata = ok; v.onerror = ko; setTimeout(ko, 8000); });
+    v.currentTime = Math.min(0.5, (v.duration || 1) / 2);
+    await new Promise((ok) => { v.onseeked = ok; setTimeout(ok, 2000); });
+    const w = Math.min(720, v.videoWidth), h = Math.round(w * v.videoHeight / v.videoWidth);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; cv.getContext('2d').drawImage(v, 0, 0, w, h);
+    URL.revokeObjectURL(v.src);
+    const blob = await new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.8));
+    if (!blob) return false;
+    const p = await api('/poster-url', { key });
+    await putPart(p.url, blob, p.contentType, () => {}, p.cacheControl);
+    return true;
+  } catch (e) { console.warn('poster skipped:', e.message); return false; }
+}
 
 /* ---------- direct-to-R2 upload: presigned PUT (<=10 MB) or resumable multipart ---------- */
 const api = async (path, body) => {
@@ -204,7 +224,7 @@ async function upload(blob, fp) {
   const flaky = (e, a) => { label.textContent = `Connexion instable (${e.message}), nouvel essai ${a}/${MAX_TRIES - 1}…`; };
 
   if (s.mode === 'single') {
-    await retry(() => putPart(s.url, blob, s.contentType, (b) => paint(b, size)), (e, a) => { flaky(e, a); bar.style.width = '0%'; });
+    await retry(() => putPart(s.url, blob, s.contentType, (b) => paint(b, size), s.cacheControl), (e, a) => { flaky(e, a); bar.style.width = '0%'; });
     await api('/upload-complete', { key: s.key });
     setProgress('✅ Envoi terminé 100%', 100);
     return s.key;
@@ -238,11 +258,12 @@ async function upload(blob, fp) {
 }
 const paint = (sentBytes, size) => { const p = Math.min(100, Math.floor((sentBytes / size) * 100)); setProgress(`Envoi… ${p}% (${mb(sentBytes)} / ${mb(size)} MB)`, p); };
 
-function putPart(url, chunk, contentType, onBytes) {
+function putPart(url, chunk, contentType, onBytes, cacheControl) {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
     x.open('PUT', url);
     if (contentType) x.setRequestHeader('Content-Type', contentType);
+    if (cacheControl) x.setRequestHeader('Cache-Control', cacheControl);
     x.upload.onprogress = (e) => onBytes(e.loaded);
     x.onload = () => (x.status >= 200 && x.status < 300 ? resolve() : reject(new Error('R2 a répondu ' + x.status)));
     x.onerror = () => reject(new Error('R2 injoignable (réseau ou CORS du bucket)'));
@@ -252,30 +273,8 @@ function putPart(url, chunk, contentType, onBytes) {
   });
 }
 
+// The feed (index.html) is the single source of what is displayed: a published clip is handed to it, never drawn here.
 function showClip(c) {
-  const m = c;
-  if (m.description || m.comment) document.querySelector('.desc').textContent = m.description || m.comment;
-  if (m.music) document.querySelector('.music').textContent = `♫ ${m.music.name} - ${m.music.artist}`;
-  announce(m.key, m);
-  const v = $('vid'); v.src = c.url; v.style.filter = fxCss(); v.load(); v.play().catch(() => {});
-  const img = document.querySelector('.video-wrap img'); if (img) img.style.display = 'none';
+  window.__arena.add(c);
   document.querySelector('[data-go="clips"]')?.click();
 }
-
-/* ---------- Clips page shows the compressed clip from R2 ---------- */
-const announce = (key, meta) => document.dispatchEvent(new CustomEvent('clip', { detail: { id: key.slice(6, key.lastIndexOf('.')), title: (meta?.description || '').split('\n')[0] } }));
-async function loadLatestClip() {
-  try {
-    const deep = (location.pathname.match(/^\/c\/([\w.-]+)/) || [])[1];
-    const one = deep && deep !== 'demo' && !deep.startsWith('u-') ? await api('/clips/' + encodeURIComponent(deep)).catch(() => null) : null;
-    if (deep && deep !== 'demo' && !one && !deep.startsWith('u-')) return;   // unknown shared clip: never show a different one
-    const c = one || (await api('/clips')).clips[0];
-    if (!c) return;
-    const m = c.meta;
-    if (m) { if (m.description) document.querySelector('.desc').textContent = m.description; if (m.musicId) { const t = (await api('/music?q=')).tracks.find((x) => x.id === m.musicId); if (t) document.querySelector('.music').textContent = `♫ ${t.name} - ${t.artist}`; } }
-    announce(c.key, m);
-    const v = $('vid'); v.src = c.url; v.load();
-    const img = document.querySelector('.video-wrap img'); if (img) img.style.display = 'none';
-  } catch { /* R2 not configured yet: keep the placeholder */ }
-}
-loadLatestClip();

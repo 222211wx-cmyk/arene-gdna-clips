@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<meta name="build-id" content="{{BUILD_ID}}">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <script>
@@ -291,8 +292,8 @@ html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) /
 <body>
 <div class="phone">
   <div class="video-wrap">
-    <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80" alt="Clip">
-    <video id="vid" src="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4" poster="" playsinline muted loop></video>
+    <img alt="Clip" style="display:none">
+    <video id="vid" preload="none" playsinline muted loop></video>
   </div>
   <div class="gradient-top"></div>
   <div class="gradient-bottom"></div>
@@ -422,17 +423,43 @@ html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) /
 <script>
 (function(){
   var v=document.getElementById('vid'),img=document.querySelector('.video-wrap img'),pl=document.querySelector('.play'),wrap=document.querySelector('.video-wrap');
-  var clips=[{url:v.src,desc:document.querySelector('.desc').textContent,name:document.querySelector('.user-name').textContent}],i=0;
-  fetch('/api/clips').then(function(r){return r.ok?r.json():null}).then(function(d){
-    if(d&&d.clips&&d.clips.length){clips=d.clips.map(function(c){var m=c.meta||{};return{key:c.key,url:c.url,desc:m.description||'',name:m.author||m.name||document.querySelector('.user-name').textContent};});i=0;show(0);}
-  }).catch(function(){});
+  var clips=[],seen={},i=0,next=null,busy=false,ready=false;
+  var nv=document.createElement('video');nv.preload='auto';nv.muted=true;nv.setAttribute('playsinline','');  // next clip only
+  var np=new Image();                                                                                    // next poster only
+  var $d=document.querySelector('.desc'),$u=document.querySelector('.user-name'),$m=document.querySelector('.music');
+  function add(list,top){
+    var fresh=list.filter(function(c){return !seen[c.id]});
+    if(top){list.forEach(function(c){if(seen[c.id]){clips=clips.filter(function(x){return x.id!==c.id})}seen[c.id]=1;});clips=list.concat(clips);}
+    else{fresh.forEach(function(c){seen[c.id]=1});clips=clips.concat(fresh);}
+  }
+  function more(){
+    if(busy||!next)return;busy=true;
+    fetch('/api/clips?limit=10&before='+encodeURIComponent(next),{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){add(d.clips||[]);next=d.next;}).catch(function(){}).then(function(){busy=false});
+  }
+  var deep=(location.pathname.match(/^\/c\/([\w.-]+)/)||[])[1];
+  var first=deep?fetch('/api/clips/'+encodeURIComponent(deep),{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).catch(function(){return null}):Promise.resolve(null);
+  Promise.all([first,fetch('/api/clips?limit=10',{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).catch(function(){return null})]).then(function(a){
+    var one=a[0],d=a[1];
+    if(deep&&!one)return;                       // unknown shared clip: never show a different one
+    if(one)add([one]);
+    if(d){add(d.clips||[]);next=d.next;}
+    ready=true;if(clips.length){i=0;show(0);}
+  });
   function show(dir){
-    var c=clips[i];v.src=c.url;v.load();img.style.display='none';pl.style.display='none';
-    document.querySelector('.desc').textContent=c.desc||'';
+    var c=clips[i];if(!c)return;
+    // poster first, then the video replaces it once frames are playing
+    if(c.poster){img.src=c.poster;img.style.display='';v.poster=c.poster;}else{img.style.display='none';}
+    v.preload='auto';v.src=c.url;v.load();pl.style.display='none';
+    v.addEventListener('playing',function h(){v.removeEventListener('playing',h);img.style.display='none';});
+    $d.textContent=c.description||c.title||'';$u.textContent=(c.author&&c.author.name)||$u.textContent;
+    $m.textContent='♫ '+(c.music?c.music.name+' - '+(c.music.artist||''):'Musique originale - '+((c.author&&c.author.name)||''));
+    document.dispatchEvent(new CustomEvent('clip',{detail:{id:c.id,title:(c.description||c.title||'').split('\n')[0]}}));
     var p=v.play();if(p&&p.catch)p.catch(function(){pl.style.display='';});
+    var n=clips[i+1];if(n){if(nv.src!==n.url){nv.src=n.url;nv.load();}if(n.poster)np.src=n.poster;}else{nv.removeAttribute('src');}
+    if(i>=clips.length-3)more();
     if(dir){wrap.classList.remove('slide-up','slide-down');void wrap.offsetWidth;wrap.classList.add(dir>0?'slide-up':'slide-down');}
   }
-  window.__arena={clips:function(){return clips},cur:function(){return i},play:function(n){if(n>=0&&n<clips.length){i=n;show(0);}}};
+  window.__arena={clips:function(){return clips},cur:function(){return i},play:function(n){if(n>=0&&n<clips.length){i=n;show(0);}},add:function(c){add([c],true);i=0;show(0);}};
   function go(d){var n=i+d;if(n<0||n>=clips.length){return;}i=n;show(d);}
   var y0=null,x0=0,ph=document.querySelector('.phone');
   ph.addEventListener('touchstart',function(e){if(e.target.closest('button,a,input,textarea,.up-sheet,.sh-sheet'))return;y0=e.touches[0].clientY;x0=e.touches[0].clientX;},{passive:true});
@@ -518,7 +545,7 @@ html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) /
   paint();
 })();
 </script>
-<script type="module" src="/upload.js"></script>
-<script type="module" src="/share.js"></script>
+<script type="module" src="/upload.js?v={{BUILD_ID}}"></script>
+<script type="module" src="/share.js?v={{BUILD_ID}}"></script>
 </body>
 </html>
