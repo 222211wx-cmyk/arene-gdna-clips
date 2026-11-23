@@ -117,7 +117,7 @@
 .st-step{display:flex;flex-direction:column;gap:12px}
 .st-prev{width:100%;height:150px;object-fit:contain;background:#000;border-radius:14px}
 .st-lbl{font-size:12px;font-weight:700;color:#aaa}
-#st-desc{width:100%;min-height:72px;border-radius:14px;border:1px solid #333;background:#1a1a1a;color:#fff;padding:10px;font-size:14px;font-family:inherit;resize:vertical}
+#st-comment,#st-desc{width:100%;min-height:72px;border-radius:14px;border:1px solid #333;background:#1a1a1a;color:#fff;padding:10px;font-size:14px;font-family:inherit;resize:vertical}
 .st-music{display:flex;gap:8px}
 .st-music button{min-height:48px;border-radius:14px;border:1px solid #333;background:#1a1a1a;color:#fff;font-weight:700;font-size:13px;cursor:pointer}
 #st-music-btn{flex:1;text-align:left;padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -334,12 +334,14 @@ html.fx-desk .topbar .top-title{font-size:clamp(20px,calc((var(--fxw) - 212px) /
   <div class="up-sheet" id="up-sheet" hidden>
     <div class="up-head"><span id="up-title">Nouveau clip</span><button id="up-close">✕</button></div>
     <div class="st-step" id="st-1">
-      <label class="up-pick" id="up-pick">Choisir un fichier vidéo<input type="file" id="up-file" accept="video/*,.mp4,.m4v,.mov,.webm,.mkv,.avi,.wmv,.flv,.3gp,.mts,.m2ts,.ts,.mpg,.mpeg,.ogv" hidden></label>
+      <label class="up-pick" id="up-pick">Choisir un fichier vidéo<input type="file" id="up-file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden></label>
     </div>
     <div class="st-step" id="st-2" hidden>
       <video id="st-prev" class="st-prev" playsinline controls loop></video>
       <div class="st-lbl">Description</div>
       <textarea id="st-desc" placeholder="Description…"></textarea>
+      <div class="st-lbl">Commentaire</div>
+      <textarea id="st-comment" placeholder="Commentaire…"></textarea>
       <div class="st-lbl">Musique</div>
       <div class="st-music">
         <button id="st-music-btn">♫ Choisir une musique</button>
