@@ -276,5 +276,5 @@ function putPart(url, chunk, contentType, onBytes, cacheControl) {
 // The feed (index.html) is the single source of what is displayed: a published clip is handed to it, never drawn here.
 function showClip(c) {
   window.__arena.add(c);
-  document.querySelector('[data-go="clips"]')?.click();
+  window.__arena.home();
 }
