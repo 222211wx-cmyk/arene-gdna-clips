@@ -81,3 +81,29 @@ export async function ask(prompt, ctx) {
     return out;
   } catch (e) { console.error('ai', e.message); return base; }
 }
+
+// "Ask AI" on a published clip: French answers. LLM when AI_API_KEY is set, otherwise built-in French templates.
+const tags = (t) => [...new Set((t.toLowerCase().match(/[a-zà-ÿ]{4,}/g) || []).slice(0, 3))].map((w) => '#' + w);
+export function clipRules(prompt, clip = {}) {
+  const p = prompt.toLowerCase(), cap = (clip.caption || '').trim() || 'ce nouveau clip', by = clip.author || 'le créateur';
+  const hs = ['#ArenaClips', ...tags(cap)].join(' ');
+  if (has(p, 'hashtag', 'tag')) return `${hs} #clip #video`;
+  if (has(p, 'commentaire', 'comment', 'répon', 'repon')) return `Superbe clip, bravo ${by} ! Continuez comme ça.`;
+  if (has(p, 'titre', 'title')) return `${cap.split(/[.!?\n]/)[0].slice(0, 60)} | Arena Clips`;
+  if (has(p, 'résum', 'resum', 'décri', 'decri', 'explique')) return `Un clip de ${by} sur Arena Clips : « ${cap} ». À découvrir et à partager.`;
+  return `Découvrez « ${cap} », un clip de ${by} sur Arena Clips. À regarder et à partager ! ${hs}`;
+}
+export async function askClip(prompt, clip) {
+  const base = clipRules(prompt, clip), key = process.env.AI_API_KEY;
+  if (!key || !prompt) return { reply: base, source: 'rules' };
+  try {
+    const r = await fetch(`${process.env.AI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: process.env.AI_MODEL || 'gpt-4o-mini', messages: [
+        { role: 'system', content: 'Tu es l\u2019assistant d\u2019Arena Clips. Réponds toujours en français professionnel, de façon concise (moins de 80 mots), sur le clip décrit.' },
+        { role: 'user', content: `Clip de ${clip.author || 'inconnu'} : « ${clip.caption || ''} ».\nDemande : ${prompt}` }] }),
+    });
+    if (!r.ok) throw new Error('llm ' + r.status);
+    return { reply: (await r.json()).choices[0].message.content.trim(), source: 'llm' };
+  } catch (e) { console.error('ai', e.message); return { reply: base, source: 'rules' }; }
+}

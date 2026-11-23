@@ -9,8 +9,9 @@ import {
 import fs from 'node:fs';
 import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
-import { ask as askAI } from './ai.js';
+import { ask as askAI, askClip } from './ai.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import * as db from './db.js';
 import { dbConfigured, migrate, getDefaultUserId, feed as dbFeed, clipById, upsertClip, knownKeys } from './db.js';
 
 // One build id per deployment: injected in the HTML and in asset URLs (?v=) so a new deploy is never mixed with an old cache.
@@ -90,6 +91,7 @@ app.get('/api/music/:id/audio', wrap(async (req, res) => {
   const r = await fetch(t.src); if (!r.ok) return res.sendStatus(502);
   res.type('audio/mpeg').set('cache-control', 'public,max-age=86400').send(Buffer.from(await r.arrayBuffer()));
 }));
+app.post('/api/ask', wrap(async (req, res) => res.json(await askClip(String(req.body.prompt || '').slice(0, 500), req.body.clip || {}))));
 app.post('/api/ai', wrap(async (req, res) => res.json(await askAI(String(req.body.prompt || '').slice(0, 500), req.body.context || {}))));
 const api = express.Router();
 api.use((req, res, next) => configured ? next()
@@ -166,15 +168,73 @@ api.post(['/upload-complete', '/upload/complete'], wrap(async (req, res) => {
 
 // Clip URLs: CDN when R2_PUBLIC_URL is set, otherwise short-lived signed R2 URLs.
 const mediaUrl = async (key) => CDN ? `${CDN}/${key}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
-const present = async (row) => ({
+const present = async (row, vs = {}) => ({
   id: row.id, key: row.key, url: await mediaUrl(row.key),
   poster: row.poster_key ? await mediaUrl(row.poster_key) : null,
   title: row.title, description: row.description, comment: row.comment,
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
   author: { handle: row.handle, name: row.display_name },
-  likes: row.likes, comments: row.comments, views: row.views, createdAt: row.created_at,
+  likes: row.likes, comments: row.comments, saves: row.saves, views: row.views, createdAt: row.created_at,
+  viewer: { liked: !!vs.liked, saved: !!vs.saved, following: !!vs.following },
 });
+// Anonymous visitor identity: random cookie token -> a users row. Read-only requests never create one.
+const COOKIE = 'aid';
+const tokenOf = (req) => (/(?:^|;\s*)aid=([a-f0-9]{24})/.exec(req.headers.cookie || '') || [])[1] || null;
+const viewerOf = async (req) => { const t = tokenOf(req); return t ? db.viewerByToken(t) : null; };
+const writerOf = async (req, res) => {
+  let t = tokenOf(req);
+  if (!t) { t = crypto.randomBytes(12).toString('hex'); res.cookie(COOKIE, t, { maxAge: 365 * 864e5, httpOnly: true, sameSite: 'lax', secure: req.secure || req.headers['x-forwarded-proto'] === 'https', path: '/' }); }
+  return db.ensureViewer(t);
+};
+const presentAll = async (req, rows) => {
+  const vs = await db.viewerState(await viewerOf(req), rows.map((r) => r.id));
+  return Promise.all(rows.map((r) => present(r, vs[r.id])));
+};
 const needDb = (req, res, next) => dbConfigured ? next() : res.status(503).json({ error: 'Base de données non configurée (DATABASE_URL)' });
+
+
+// ---- Social: like / save / comments / follow / citizen card / messages (all stored in Postgres) ----
+const social = express.Router();
+social.use((req, res, next) => (/^\/(clips\/[^/]+\/(like|save|comments|follow)|citizen\/|messages|me$)/.test(req.path) ? needDb(req, res, next) : next()));
+const clipOr404 = async (req, res) => {
+  if (!clipId(req.params.id)) { res.status(400).json({ error: 'requête invalide' }); return null; }
+  const row = await clipById(req.params.id);
+  if (!row) res.status(404).json({ error: 'clip introuvable' });
+  return row;
+};
+const flag = (req) => (typeof req.body?.on === 'boolean' ? req.body.on : true);
+social.put('/clips/:id/like', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setLike(await writerOf(req, res), c.id, flag(req))); }));
+social.put('/clips/:id/save', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setSave(await writerOf(req, res), c.id, flag(req))); }));
+social.get('/clips/:id/comments', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.set('Cache-Control', 'no-store').json({ comments: await db.listComments(c.id) }); }));
+social.post('/clips/:id/comments', wrap(async (req, res) => {
+  const c = await clipOr404(req, res); if (!c) return;
+  const body = String(req.body?.body || '').trim().slice(0, 500);
+  if (!body) return res.status(400).json({ error: 'commentaire vide' });
+  res.json(await db.addComment(await writerOf(req, res), c.id, body));
+}));
+social.put('/clips/:id/follow', wrap(async (req, res) => {
+  const c = await clipOr404(req, res); if (!c) return;
+  const r = await db.setFollow(await writerOf(req, res), c.author_id, flag(req));
+  if (r.error) return res.status(400).json({ error: 'vous ne pouvez pas vous suivre vous-même' });
+  res.json(r);
+}));
+social.get('/citizen/:handle', wrap(async (req, res) => {
+  const u = await db.citizen(String(req.params.handle).slice(0, 80), await viewerOf(req));
+  if (!u) return res.status(404).json({ error: 'créateur introuvable' });
+  res.set('Cache-Control', 'no-store').json({ handle: u.handle, name: u.display_name, citizenId: 'AC-' + u.id.slice(0, 8).toUpperCase(), clips: u.clips, followers: u.followers, following: u.following });
+}));
+social.post('/messages', wrap(async (req, res) => {
+  const body = String(req.body?.body || '').trim().slice(0, 1000);
+  if (!body) return res.status(400).json({ error: 'message vide' });
+  const to = await db.citizen(String(req.body?.to || ''), null);
+  if (!to) return res.status(404).json({ error: 'destinataire introuvable' });
+  const from = await writerOf(req, res);
+  if (from === to.id) return res.status(400).json({ error: 'destinataire invalide' });
+  res.json(await db.sendMessage(from, to.id, clipId(req.body?.clip) ? req.body.clip : null, body));
+}));
+social.get('/messages', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ messages: v ? await db.inbox(v) : [] }); }));
+social.get('/me', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ saved: v ? await presentAll(req, await db.savedClips(v)) : [] }); }));
+app.use('/api', social);
 
 // One DB row per clip (id is the primary key, so a retry can never create a duplicate).
 api.post('/publish', needDb, wrap(async (req, res) => {
@@ -190,7 +250,7 @@ api.post('/publish', needDb, wrap(async (req, res) => {
     description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
     musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
   });
-  res.json(await present(row));
+  res.json((await presentAll(req, [row]))[0]);
 }));
 
 api.post('/upload/abort', wrap(async (req, res) => {
@@ -208,7 +268,7 @@ api.get('/clips/:id', needDb, wrap(async (req, res) => {
   if (!clipId(req.params.id)) return res.status(400).json({ error: 'bad request' });
   const row = await clipById(req.params.id);
   if (!row) return res.status(404).json({ error: 'clip introuvable' });
-  res.set('Cache-Control', 'no-store').json(await present(row));
+  res.set('Cache-Control', 'no-store').json((await presentAll(req, [row]))[0]);
 }));
 
 // Download: redirect to a short-lived signed R2 URL (bytes never pass through this server).
@@ -225,8 +285,8 @@ api.get('/clips/:id/download', wrap(async (req, res) => {
 
 // The feed: straight from the database, newest first, keyset-paginated (?limit=&before=).
 api.get('/clips', needDb, wrap(async (req, res) => {
-  const { rows, next } = await dbFeed({ limit: Number(req.query.limit) || 10, before: /^[\w:.+-]+_[\w.-]+$/.test(req.query.before || '') ? req.query.before : undefined });
-  res.set('Cache-Control', 'no-store').json({ clips: await Promise.all(rows.map(present)), next, build: BUILD_ID });
+  const { rows, next } = await dbFeed({ limit: Number(req.query.limit) || 10, before: /^[\w:.+-]+_[\w.-]+$/.test(req.query.before || '') ? req.query.before : undefined, q: String(req.query.q || '').trim().slice(0, 80) || undefined });
+  res.set('Cache-Control', 'no-store').json({ clips: await presentAll(req, rows), next, build: BUILD_ID });
 }));
 
 // One-time import of clips that already live in R2 (old meta/*.json records) into the database.
