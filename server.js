@@ -11,6 +11,14 @@ import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
 import { ask as askAI } from './ai.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { dbConfigured, migrate, getDefaultUserId, feed as dbFeed, clipById, upsertClip, knownKeys } from './db.js';
+
+// One build id per deployment: injected in the HTML and in asset URLs (?v=) so a new deploy is never mixed with an old cache.
+const BUILD_ID = (process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RAILWAY_DEPLOYMENT_ID || String(Date.now())).slice(0, 12);
+// Public CDN base for R2 (r2.dev or a custom domain). Objects are immutable, so browsers/CDN cache them for a year.
+const CDN = (process.env.R2_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+const POSTER_EXT = 'jpg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nm = (p) => path.join(__dirname, 'node_modules', p);
@@ -46,6 +54,7 @@ const TYPES = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 const keyOk = (k) => typeof k === 'string' && /^clips\/[\w.-]+\.(mp4|mov|webm)$/.test(k);
 const idOf = (k) => k.slice(6, k.lastIndexOf('.'));
 const metaKey = (k) => `meta/${idOf(k)}.json`;
+const posterKey = (k) => `posters/${idOf(k)}.jpg`;
 
 // Bucket health (cached) + best-effort CORS so browsers may PUT straight to R2.
 let health = { at: 0, ok: false, error: 'not checked' };
@@ -97,11 +106,19 @@ api.post('/upload-url', wrap(async (req, res) => {
   const key = `clips/${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
   const ContentType = TYPES[ext];
   if (size <= SINGLE_MAX) {
-    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType }), { expiresIn: 3600 });
-    return res.json({ mode: 'single', key, url, contentType: ContentType });
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType, CacheControl: IMMUTABLE }), { expiresIn: 3600 });
+    return res.json({ mode: 'single', key, url, contentType: ContentType, cacheControl: IMMUTABLE });
   }
-  const r = await s3.send(new CreateMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, ContentType }));
+  const r = await s3.send(new CreateMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, ContentType, CacheControl: IMMUTABLE }));
   res.json({ mode: 'multipart', key, uploadId: r.UploadId, partSize: PART_SIZE, contentType: ContentType });
+}));
+
+// Poster (first-frame jpg) uploaded straight to R2 next to the clip.
+api.post('/poster-url', wrap(async (req, res) => {
+  if (!keyOk(req.body.key)) return res.status(400).json({ error: 'bad request' });
+  const key = posterKey(req.body.key);
+  const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType: 'image/jpeg', CacheControl: IMMUTABLE }), { expiresIn: 3600 });
+  res.json({ key, url, contentType: 'image/jpeg', cacheControl: IMMUTABLE });
 }));
 
 api.post('/upload/part-url', wrap(async (req, res) => {
@@ -147,21 +164,33 @@ api.post(['/upload-complete', '/upload/complete'], wrap(async (req, res) => {
   res.json({ key, size: h?.ContentLength });
 }));
 
-// One record per clip: video_url (R2 key), title, description, comment, music, enhancement - saved together.
-api.post('/publish', wrap(async (req, res) => {
-  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {} } = req.body;
+// Clip URLs: CDN when R2_PUBLIC_URL is set, otherwise short-lived signed R2 URLs.
+const mediaUrl = async (key) => CDN ? `${CDN}/${key}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
+const present = async (row) => ({
+  id: row.id, key: row.key, url: await mediaUrl(row.key),
+  poster: row.poster_key ? await mediaUrl(row.poster_key) : null,
+  title: row.title, description: row.description, comment: row.comment,
+  music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
+  author: { handle: row.handle, name: row.display_name },
+  likes: row.likes, comments: row.comments, views: row.views, createdAt: row.created_at,
+});
+const needDb = (req, res, next) => dbConfigured ? next() : res.status(503).json({ error: 'Base de données non configurée (DATABASE_URL)' });
+
+// One DB row per clip (id is the primary key, so a retry can never create a duplicate).
+api.post('/publish', needDb, wrap(async (req, res) => {
+  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false } = req.body;
   if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
   const music = musicId ? musicById(musicId) : null;
   if (musicId && !music) return res.status(400).json({ error: 'musique inconnue' });
   const fx = { eclairage: Number(enhancement.eclairage) || 0, couleur: Number(enhancement.couleur) || 0, cartoon: !!enhancement.cartoon };
-  const meta = {
-    key, video_url: key, id: idOf(key), title: String(title).slice(0, 120), description: String(description).slice(0, 2200),
-    comment: String(comment).slice(0, 2200), musicId, music: music ? { id: music.id, name: music.name, artist: music.artist } : null,
-    enhancement: fx, publishedAt: new Date().toISOString(),
-  };
-  await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: metaKey(key), Body: JSON.stringify(meta), ContentType: 'application/json' }));
-  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
-  res.json({ ...meta, url });
+  let pk = null;
+  if (poster) { try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: posterKey(key) })); pk = posterKey(key); } catch {} }
+  const row = await upsertClip({
+    id: idOf(key), userId: getDefaultUserId(), key, posterKey: pk, title: String(title).slice(0, 120),
+    description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
+    musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
+  });
+  res.json(await present(row));
 }));
 
 api.post('/upload/abort', wrap(async (req, res) => {
@@ -171,17 +200,15 @@ api.post('/upload/abort', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-const meta = async (k) => { try { const g = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: metaKey(k) })); return JSON.parse(await g.Body.transformToString()); } catch { return null; } };
-const findKey = async (id) => { for (const e of Object.keys(TYPES)) { const k = `clips/${id}.${e}`; try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: k })); return k; } catch {} } return null; };
-const metaOf = async (id) => { const k = await findKey(id); return k ? meta(k) : null; };
+const findKey = async (id) => { const row = dbConfigured ? await clipById(id) : null; if (row) return row.key; for (const e of Object.keys(TYPES)) { const k = `clips/${id}.${e}`; try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: k })); return k; } catch {} } return null; };
 const clipId = (id) => typeof id === 'string' && /^[\w.-]+$/.test(id) && id.length < 80;
 
 // One clip by id (deep link /c/:id).
-api.get('/clips/:id', wrap(async (req, res) => {
+api.get('/clips/:id', needDb, wrap(async (req, res) => {
   if (!clipId(req.params.id)) return res.status(400).json({ error: 'bad request' });
-  const key = await findKey(req.params.id);
-  if (!key) return res.status(404).json({ error: 'clip introuvable' });
-  res.json({ key, meta: await meta(key), url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 }) });
+  const row = await clipById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'clip introuvable' });
+  res.set('Cache-Control', 'no-store').json(await present(row));
 }));
 
 // Download: redirect to a short-lived signed R2 URL (bytes never pass through this server).
@@ -196,37 +223,56 @@ api.get('/clips/:id/download', wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store').redirect(302, url);
 }));
 
-// Newest compressed clips, each with a short-lived playback URL.
-api.get('/clips', wrap(async (req, res) => {
-  const r = await s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: 'clips/' }));
-  const items = (r.Contents || []).filter((o) => keyOk(o.Key)).sort((a, b) => b.LastModified - a.LastModified).slice(0, 20);
-  res.json({ clips: await Promise.all(items.map(async (o) => ({
-    key: o.Key, size: o.Size, modified: o.LastModified, meta: await meta(o.Key),
-    url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: o.Key }), { expiresIn: 3600 }),
-  }))) });
+// The feed: straight from the database, newest first, keyset-paginated (?limit=&before=).
+api.get('/clips', needDb, wrap(async (req, res) => {
+  const { rows, next } = await dbFeed({ limit: Number(req.query.limit) || 10, before: /^[\w:.+-]+_[\w.-]+$/.test(req.query.before || '') ? req.query.before : undefined });
+  res.set('Cache-Control', 'no-store').json({ clips: await Promise.all(rows.map(present)), next, build: BUILD_ID });
 }));
+
+// One-time import of clips that already live in R2 (old meta/*.json records) into the database.
+async function backfill() {
+  if (!configured || !dbConfigured) return;
+  const known = await knownKeys(); let n = 0, token;
+  do {
+    const r = await s3.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: 'clips/', ContinuationToken: token }));
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    for (const o of (r.Contents || []).filter((o) => keyOk(o.Key) && !known.has(o.Key))) {
+      let m = {};
+      try { const g = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: metaKey(o.Key) })); m = JSON.parse(await g.Body.transformToString()); } catch {}
+      await upsertClip({
+        id: idOf(o.Key), userId: getDefaultUserId(), key: o.Key, title: m.title || '', description: m.description || '', comment: m.comment || '',
+        musicId: m.music?.id || null, musicName: m.music?.name || null, musicArtist: m.music?.artist || null, enhancement: m.enhancement || {},
+        createdAt: m.publishedAt || o.LastModified.toISOString(),
+      }); n++;
+    }
+  } while (token);
+  if (n) console.log(`[db] imported ${n} existing clip(s) from R2`);
+}
+migrate().then(() => { console.log(dbConfigured ? '[db] ready' : '[db] DATABASE_URL not set'); return backfill(); })
+  .catch((e) => console.error('[db] startup failed:', e.message));
 
 app.get('/api/config', async (req, res) => {
   const h = await checkBucket(req.query.force === '1');
-  res.json({ configured, bucketOk: !!h.ok, error: h.ok ? undefined : h.error, maxMB: MAX_SIZE / 1048576 });
+  res.json({ configured, db: dbConfigured, cdn: !!CDN, build: BUILD_ID, bucketOk: !!h.ok, error: h.ok ? undefined : h.error, maxMB: MAX_SIZE / 1048576 });
 });
 app.use('/api', api);
 app.use('/vendor/ffmpeg', express.static(nm('@ffmpeg/ffmpeg/dist/esm')));
 app.use('/vendor/core', express.static(nm('@ffmpeg/core/dist/esm')));
-const vars = { BRAND_NAME, TAB_LABEL, CANONICAL_URL };
+const vars = { BRAND_NAME, TAB_LABEL, CANONICAL_URL, BUILD_ID };
 const template = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
 const attr = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const render = (extra = {}) => template.replace(/\{\{(\w+)\}\}/g, (_, k) => attr({ ...vars, OG_TITLE: BRAND_NAME, PAGE_URL: CANONICAL_URL, ...extra }[k] ?? ''));
 const indexHtml = render();
-const sendIndex = (req, res) => res.type('html').send(indexHtml);
+const noStore = (res) => res.set('Cache-Control', 'no-store').set('X-Build-Id', BUILD_ID);
+const sendIndex = (req, res) => noStore(res).type('html').send(indexHtml);
 // Shared clip link: same app, with the clip's title in the link preview.
 app.get('/c/:id', async (req, res) => {
   const id = req.params.id; let title = '';
-  if (configured && clipId(id)) { const m = await metaOf(id).catch(() => null); title = (m?.description || '').split('\n')[0].slice(0, 90); }
-  res.type('html').send(render({ OG_TITLE: title ? `${title} - ${BRAND_NAME}` : BRAND_NAME, PAGE_URL: `${CANONICAL_URL}/c/${id}` }));
+  if (dbConfigured && clipId(id)) { const m = await clipById(id).catch(() => null); title = (m?.description || m?.title || '').split('\n')[0].slice(0, 90); }
+  noStore(res).type('html').send(render({ OG_TITLE: title ? `${title} - ${BRAND_NAME}` : BRAND_NAME, PAGE_URL: `${CANONICAL_URL}/c/${id}` }));
 });
 app.get(['/', '/index.html'], sendIndex);
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+app.use(express.static(path.join(__dirname, 'public'), { index: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 app.use(sendIndex);
 
 const port = process.env.PORT || 8080;
