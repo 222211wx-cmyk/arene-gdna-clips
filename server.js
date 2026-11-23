@@ -221,7 +221,7 @@ social.put('/clips/:id/follow', wrap(async (req, res) => {
 social.get('/citizen/:handle', wrap(async (req, res) => {
   const u = await db.citizen(String(req.params.handle).slice(0, 80), await viewerOf(req));
   if (!u) return res.status(404).json({ error: 'créateur introuvable' });
-  res.set('Cache-Control', 'no-store').json({ handle: u.handle, name: u.display_name, citizenId: 'AC-' + u.id.slice(0, 8).toUpperCase(), clips: u.clips, followers: u.followers, following: u.following });
+  res.set('Cache-Control', 'no-store').json({ handle: u.handle, name: u.display_name, citizenId: `#${u.year}-${u.seq}`, verified: u.clips > 0, clips: u.clips, followers: u.followers, following: u.following });
 }));
 social.post('/messages', wrap(async (req, res) => {
   const body = String(req.body?.body || '').trim().slice(0, 1000);
@@ -232,7 +232,7 @@ social.post('/messages', wrap(async (req, res) => {
   if (from === to.id) return res.status(400).json({ error: 'destinataire invalide' });
   res.json(await db.sendMessage(from, to.id, clipId(req.body?.clip) ? req.body.clip : null, body));
 }));
-social.get('/messages', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ messages: v ? await db.inbox(v) : [] }); }));
+social.get('/messages', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ messages: v ? await db.inbox(v, String(req.query.with || '').slice(0, 80) || undefined) : [] }); }));
 social.get('/me', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ saved: v ? await presentAll(req, await db.savedClips(v)) : [] }); }));
 app.use('/api', social);
 

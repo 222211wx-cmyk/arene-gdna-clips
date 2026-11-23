@@ -195,7 +195,8 @@ export async function setFollow(userId, authorId, on) {
 }
 export async function citizen(handle, viewerId) {
   const { rows } = await pool.query(
-    `SELECT u.id, u.handle, u.display_name,
+    `SELECT u.id, u.handle, u.display_name, extract(year FROM u.created_at)::int AS year,
+       (SELECT count(*)::int FROM clips.users o WHERE (o.created_at, o.id) <= (u.created_at, u.id)) AS seq,
        (SELECT count(*)::int FROM clips.clips c WHERE c.user_id = u.id) AS clips,
        (SELECT count(*)::int FROM clips.follows f WHERE f.followee_id = u.id) AS followers,
        EXISTS (SELECT 1 FROM clips.follows f WHERE f.followee_id = u.id AND f.follower_id = $2) AS following
@@ -207,7 +208,13 @@ export async function sendMessage(fromId, toId, clipId, body) {
     'INSERT INTO clips.messages (from_id, to_id, clip_id, body) VALUES ($1,$2,$3,$4) RETURNING id, body, created_at', [fromId, toId, clipId || null, body]);
   return rows[0];
 }
-export async function inbox(userId) {
+export async function inbox(userId, withHandle) {
+  if (withHandle) {
+    const { rows } = await pool.query(
+      `SELECT m.id, m.body, m.created_at, m.from_id = $1 AS mine FROM clips.messages m JOIN clips.users o ON o.handle = $2
+       WHERE (m.from_id = $1 AND m.to_id = o.id) OR (m.to_id = $1 AND m.from_id = o.id) ORDER BY m.created_at DESC, m.id DESC LIMIT 100`, [userId, withHandle]);
+    return rows;
+  }
   const { rows } = await pool.query(
     `SELECT m.id, m.body, m.created_at, m.from_id = $1 AS mine, m.clip_id,
        CASE WHEN m.from_id = $1 THEN t.display_name ELSE f.display_name END AS other

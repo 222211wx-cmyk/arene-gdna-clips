@@ -22,7 +22,11 @@
   .ico svg{width:100%;height:100%}
   .rail-btn.on svg{fill:#ff2d55;stroke:#ff2d55}
   .rail-btn.saved svg{fill:#FFD700;stroke:#FFD700}
-  .tab.active{color:#fff}.tab{color:rgba(255,255,255,.65)}
+  .tab.active{color:#fbbf24}.tab{color:rgba(255,255,255,.65)}
+  svg.lucide{stroke-width:2}
+  .glass{background:rgba(20,20,20,.65);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+  @keyframes dotpulse{0%{box-shadow:0 0 0 0 rgba(251,191,36,.7)}70%{box-shadow:0 0 0 7px rgba(251,191,36,0)}100%{box-shadow:0 0 0 0 rgba(251,191,36,0)}}
+  .dot-pulse{animation:dotpulse 1.8s infinite}
   .slide-up{animation:slu .28s ease-out}.slide-down{animation:sld .28s ease-out}
   @keyframes slu{from{transform:translateY(100%)}to{transform:none}}
   @keyframes sld{from{transform:translateY(-100%)}to{transform:none}}
@@ -40,20 +44,20 @@
   <div id="empty" class="absolute inset-0 hidden items-center justify-center px-8 text-center text-white/80">Aucun clip pour le moment. Appuyez sur Importer pour publier le premier.</div>
 
   <!-- Header: Menu | logo | Importer, then the one search bar -->
-  <header class="absolute inset-x-0 top-0 z-30 px-3 pt-[calc(env(safe-area-inset-top)+8px)]">
+  <header class="glass absolute inset-x-0 top-0 z-30 px-3 pb-2 pt-[calc(env(safe-area-inset-top)+8px)]">
     <div class="grid h-12 grid-cols-[1fr_auto_1fr] items-center">
-      <button id="b-menu" aria-label="Menu" class="flex h-11 w-11 items-center justify-center justify-self-start rounded-full"><i data-lucide="menu" class="h-7 w-7"></i></button>
-      <div class="flex items-center gap-2 text-xl font-extrabold tracking-tight txs"><i data-lucide="clapperboard" class="h-6 w-6 text-gold"></i><span>Arena Clips</span></div>
-      <button id="up-open" aria-label="Importer" class="flex h-11 items-center gap-1.5 justify-self-end rounded-full bg-black/45 px-3 text-sm font-bold backdrop-blur"><i data-lucide="upload" class="h-5 w-5"></i>Importer</button>
+      <button id="b-menu" aria-label="Menu" class="flex h-11 w-11 items-center justify-center justify-self-start rounded-full"><i data-lucide="menu" class="h-6 w-6"></i></button>
+      <div class="flex items-center gap-1.5 text-2xl font-extrabold tracking-tight"><span class="text-white">Arena</span><span class="text-amber-400">Clips</span><span class="dot-pulse ml-0.5 h-2 w-2 rounded-full bg-amber-400"></span></div>
+      <button id="up-open" aria-label="Importer" class="flex h-10 items-center gap-1.5 justify-self-end rounded-full bg-amber-400 px-3.5 text-sm font-bold text-black"><i data-lucide="upload" class="h-4 w-4"></i>Importer</button>
     </div>
-    <form id="search-form" role="search" action="javascript:void(0)" class="mt-1 flex h-10 items-center gap-2 rounded-full bg-black/45 px-3 backdrop-blur">
+    <form id="search-form" role="search" action="javascript:void(0)" class="mt-1 flex h-10 items-center gap-2 rounded-full bg-white/10 px-3">
       <i data-lucide="search" class="h-5 w-5 shrink-0"></i>
-      <input id="q" type="search" placeholder="Rechercher un clip ou un créateur" enterkeyhint="search" autocomplete="off" aria-label="Recherche" class="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/80 outline-none">
+      <input id="q" type="search" placeholder="Rechercher un clip ou un créateur" enterkeyhint="search" autocomplete="off" aria-label="Recherche" class="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/70 outline-none">
     </form>
   </header>
 
   <!-- Right rail: Like, Comment, Share, Save (all stored in the database) -->
-  <aside class="absolute right-3 z-20 flex flex-col items-center gap-5 bottom-[calc(env(safe-area-inset-bottom)+232px)]">
+  <aside class="absolute right-3 z-20 flex flex-col items-center gap-4 bottom-[calc(env(safe-area-inset-bottom)+128px)]">
     <button id="r-like" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="J'aime"><i data-lucide="heart" class="h-8 w-8"></i><span class="text-xs font-bold txs" data-n>0</span></button>
     <button id="r-comment" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="Commentaires"><i data-lucide="message-circle" class="h-8 w-8"></i><span class="text-xs font-bold txs" data-n>0</span></button>
     <button id="r-share" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="Partager"><i data-lucide="share-2" class="h-8 w-8"></i><span class="text-xs font-bold txs">Partager</span></button>
@@ -61,20 +65,20 @@
   </aside>
 
   <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
-  <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+128px)] pr-20">
+  <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+124px)] pr-20">
     <div class="flex items-center gap-2">
-      <div id="avatar" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-white bg-gold text-sm font-extrabold text-black">AC</div>
-      <div id="author" class="min-w-0 truncate text-[15px] font-bold txs"></div>
-      <button id="follow" class="shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
+      <div id="avatar" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-sm font-extrabold text-black">AC</div>
+      <div class="min-w-0 leading-tight"><div id="author" class="truncate text-[15px] font-bold txs"></div><div id="handle" class="truncate text-xs text-white/75 txs"></div></div>
+      <button id="follow" class="ml-1 shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
     </div>
     <p id="caption" class="mt-2 line-clamp-2 text-sm leading-snug txs"></p>
-    <p id="music" class="mt-1.5 flex items-center gap-1.5 truncate text-xs opacity-90 txs"><i data-lucide="music-2" class="h-3.5 w-3.5 shrink-0"></i><span class="truncate"></span></p>
+    <p id="music" class="mt-1.5 flex items-center gap-1.5 truncate text-xs opacity-90 txs"><i data-lucide="music" class="h-3.5 w-3.5 shrink-0"></i><span class="truncate"></span></p>
   </section>
 
   <div class="absolute inset-x-3 z-20 flex gap-2 bottom-[calc(env(safe-area-inset-bottom)+72px)]">
-    <button id="t-card" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[#F3E6B8] text-[13px] font-bold text-neutral-900"><i data-lucide="id-card" class="h-4 w-4"></i>Carte Citoyen</button>
+    <button id="t-card" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[#F3E6B8] text-[13px] font-bold text-neutral-900"><i data-lucide="id-card" class="h-4 w-4"></i>Citizen Card</button>
     <button id="t-msg" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[#F3E6B8] text-[13px] font-bold text-neutral-900"><i data-lucide="send" class="h-4 w-4"></i>Message</button>
-    <button id="t-ai" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-neutral-900 text-[13px] font-bold text-white ring-1 ring-white/25"><i data-lucide="sparkles" class="h-4 w-4 text-gold"></i>Demander à l'IA</button>
+    <button id="t-ai" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-neutral-900 text-[13px] font-bold text-white ring-1 ring-white/25"><i data-lucide="sparkles" class="h-4 w-4 text-gold"></i>Ask AI<span id="ai-badge" hidden class="ml-0.5 rounded-full bg-amber-400 px-1.5 text-[10px] font-extrabold text-black">0</span></button>
   </div>
 
   <nav class="absolute inset-x-0 bottom-0 z-40 flex h-[calc(64px+env(safe-area-inset-bottom))] items-start border-t border-white/10 bg-black/70 pb-[env(safe-area-inset-bottom)] backdrop-blur">
@@ -86,7 +90,7 @@
   </nav>
 
   <!-- Pages: Recherche, Clips, Messages, Profil -->
-  <main id="page" hidden class="absolute inset-x-0 bottom-[calc(64px+env(safe-area-inset-bottom))] top-[calc(env(safe-area-inset-top)+108px)] z-25 overflow-y-auto bg-neutral-950 p-4" style="z-index:25"></main>
+  <main id="page" hidden class="absolute inset-x-0 bottom-[calc(64px+env(safe-area-inset-bottom))] top-[calc(env(safe-area-inset-top)+116px)] z-25 overflow-y-auto bg-neutral-950 p-4" style="z-index:25"></main>
 
   <!-- Modal layer (comments, citizen card, message, Ask AI, menu, share toast) -->
   <div id="back" hidden class="absolute inset-0 z-50 bg-black/60"></div>
@@ -141,7 +145,7 @@
   'use strict';
   var $=function(id){return document.getElementById(id)};
   var BASE=document.querySelector('meta[name=arena-base]').content.replace(/\/+$/,'');
-  var FALLBACK='Découvrez ce nouveau clip sur Arena Clips !';
+  var FALLBACK='Découvrez ce nouveau clip sur Arena Clips ! ✨ #ArenaClips';
   var v=$('vid'),poster=$('poster'),page=$('page'),modal=$('modal'),back=$('back');
   var clips=[],seen={},i=0,next=null,busy=false,tab='home';
 
@@ -154,17 +158,17 @@
       .then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.error||'Une erreur est survenue');return j;});});
   }
   // Strip camera file names (VID_2025..., IMG_...), file extensions and long digit runs; fall back to the default line.
-  function cleanCaption(t){
+  function cleanVideoCaption(t){
     var s=String(t||'')
       .replace(/\b(?:VID|IMG|MOV|MVI|PXL|DSC|PIC|WA|Screenrecording|Screen[ _-]?Recording)[-_ ]*\d[\d_\s-]*/gi,' ')
       .replace(/\.(?:mp4|mov|webm)\b/gi,' ')
       .replace(/\b\d{4}[-_.]\d{2}[-_.]\d{2}\b/g,' ')
       .replace(/\b\d{2}[.:]\d{2}[.:]\d{2}\b/g,' ')
-      .replace(/\d{6,}/g,' ')
+      .replace(/\d{10,}/g,' ')
       .replace(/\s+/g,' ').replace(/^[\s_.\-–—:,;]+|[\s_.\-–—:,;]+$/g,'');
     return s||FALLBACK;
   }
-  var cap=function(c){return cleanCaption(c.description||c.title||'')};
+  var cap=function(c){return cleanVideoCaption(c.description||c.title||'')};
   var cur=function(){return clips[i]};
   var initials=function(n){return String(n||'AC').split(/\s+/).map(function(w){return w[0]}).slice(0,2).join('').toUpperCase()||'AC'};
   function copyText(t){
@@ -211,12 +215,13 @@
     var name=(c.author&&c.author.name)||'Arena Clips';
     $('author').textContent=name;$('avatar').textContent=initials(name);
     $('caption').textContent=cap(c);
-    $('music').lastElementChild.textContent=c.music?c.music.name+(c.music.artist?' - '+c.music.artist:''):'Son original - '+name;
+    $('handle').textContent='@'+((c.author&&c.author.handle)||'');
+    $('music').lastElementChild.textContent=c.music?c.music.name+(c.music.artist?' - '+c.music.artist:''):'Son original';
     var vw=c.viewer||{};
     $('r-like').classList.toggle('on',!!vw.liked);$('r-like').querySelector('[data-n]').textContent=c.likes||0;
     $('r-save').classList.toggle('saved',!!vw.saved);$('r-save').querySelector('[data-n]').textContent=c.saves||0;
     $('r-comment').querySelector('[data-n]').textContent=c.comments||0;
-    var f=$('follow');f.textContent=vw.following?'Abonné':'Suivre';f.classList.toggle('bg-white',!!vw.following);f.classList.toggle('text-black',!!vw.following);
+    var f=$('follow');f.textContent=vw.following?'Abonné ✓':'Suivre';f.classList.toggle('bg-white',!!vw.following);f.classList.toggle('text-black',!!vw.following);
   }
   function go(d){var n=i+d;if(n<0||n>=clips.length)return;i=n;show(d);}
   function openClip(c){
@@ -244,10 +249,13 @@
   }
   $('r-like').onclick=function(){toggle('like')};
   $('r-save').onclick=function(){toggle('save')};
-  $('r-share').onclick=function(){
+  function shareClip(){
     var c=cur();if(!c)return;var url=BASE+'/c/'+encodeURIComponent(c.id);
-    copyText(url).then(function(){toast('Lien copié : '+url)});
-  };
+    var copy=function(){return copyText(url).then(function(){toast('Lien copié')});};
+    if(navigator.share){navigator.share({title:cap(c),url:url}).catch(function(e){if(e&&e.name!=='AbortError')copy();});}
+    else copy();
+  }
+  $('r-share').onclick=shareClip;
   $('follow').onclick=function(){
     var c=cur();if(!c)return;var vw=c.viewer||(c.viewer={}),on=!vw.following,h=c.author.handle;
     clips.forEach(function(x){if(x.author.handle===h)(x.viewer||(x.viewer={})).following=on});paint();
@@ -278,33 +286,37 @@
   /* Citizen Card (users / clips / follows tables) */
   $('t-card').onclick=function(){
     var c=cur();if(!c)return;
-    openModal(head('Carte Citoyen')+'<div id="cc" class="text-sm text-neutral-300">Chargement…</div>');
+    openModal(head('Citizen Card')+'<div id="cc" class="text-sm text-neutral-300">Chargement…</div>');
     api('GET','/api/citizen/'+encodeURIComponent(c.author.handle)).then(function(u){
-      $('cc').innerHTML='<div class="rounded-2xl bg-gradient-to-br from-[#FFF3C4] to-[#F3E6B8] p-4 text-neutral-900"><div class="flex items-center gap-3"><div class="flex h-14 w-14 items-center justify-center rounded-full bg-black text-lg font-extrabold text-gold">'+esc(initials(u.name))+'</div><div class="min-w-0"><div class="truncate text-lg font-extrabold">'+esc(u.name)+'</div><div class="text-xs font-semibold opacity-70">@'+esc(u.handle)+'</div></div></div>'+
-        '<div class="mt-4 text-xs font-semibold uppercase opacity-60">Identifiant</div><div class="font-mono text-base font-bold">'+esc(u.citizenId)+'</div>'+
-        '<div class="mt-4 grid grid-cols-2 gap-3 text-center"><div class="rounded-xl bg-white/60 py-2"><div id="cc-clips" class="text-2xl font-extrabold">'+u.clips+'</div><div class="text-xs">Clips</div></div><div class="rounded-xl bg-white/60 py-2"><div id="cc-fol" class="text-2xl font-extrabold">'+u.followers+'</div><div class="text-xs">Abonnés</div></div></div></div>';
+      $('cc').innerHTML='<div class="rounded-2xl bg-gradient-to-br from-[#FFF3C4] to-[#F3E6B8] p-4 text-neutral-900"><div class="flex items-center gap-3"><div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-black text-lg font-extrabold text-amber-400">'+esc(initials(u.name))+'</div><div class="min-w-0"><div class="truncate text-lg font-extrabold">'+esc(u.name)+'</div><div class="text-xs font-semibold opacity-70">@'+esc(u.handle)+'</div>'+(u.verified?'<div class="mt-1 inline-flex items-center gap-1 rounded-full bg-black px-2 py-0.5 text-[11px] font-bold text-amber-400"><i data-lucide="badge-check" class="h-3.5 w-3.5"></i>Verified</div>':'')+'</div></div>'+
+        '<div class="mt-4 text-xs font-semibold uppercase opacity-60">ID</div><div class="font-mono text-base font-bold">'+esc(u.citizenId)+'</div>'+
+        '<div class="mt-4 grid grid-cols-2 gap-3 text-center"><div class="rounded-xl bg-white/60 py-2"><div class="text-2xl font-extrabold">'+u.clips+'</div><div class="text-xs">Clips</div></div><div class="rounded-xl bg-white/60 py-2"><div class="text-2xl font-extrabold">'+u.followers+'</div><div class="text-xs">Abonnés</div></div></div></div>';icons();
     }).catch(function(e){$('cc').textContent=e.message});
   };
 
   /* Message (messages table) */
   function composeMessage(c){
-    openModal(head('Message à '+esc(c.author.name))+'<form id="mg" class="flex flex-col gap-3" action="javascript:void(0)"><textarea id="mg-b" rows="4" maxlength="1000" placeholder="Écrivez votre message…" class="rounded-2xl border border-neutral-700 bg-neutral-800 p-3 text-sm text-white outline-none"></textarea><button class="'+btn+'">Envoyer</button></form>');
+    openModal(head('Message · '+esc(c.author.name))+'<div id="mg-list" class="mb-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto text-sm"><div class="text-neutral-400">Chargement…</div></div><form id="mg" class="flex gap-2" action="javascript:void(0)"><input id="mg-b" maxlength="1000" autocomplete="off" placeholder="Écrire à @'+esc(c.author.handle)+'…" class="'+field+'"><button class="'+btn+'">Envoyer</button></form>');
+    var list=$('mg-list');
+    function bub(m){return '<div class="'+(m.mine?'self-end bg-amber-400 text-black':'self-start bg-neutral-800')+' max-w-[85%] break-words rounded-2xl px-3 py-2">'+esc(m.body)+'</div>';}
+    api('GET','/api/messages?with='+encodeURIComponent(c.author.handle)).then(function(r){var ms=r.messages.slice().reverse();list.innerHTML=ms.length?ms.map(bub).join(''):'<div class="text-neutral-400">Aucun message. Écrivez le premier.</div>';list.scrollTop=list.scrollHeight;}).catch(function(e){list.textContent=e.message});
     $('mg').onsubmit=function(e){e.preventDefault();var b=$('mg-b').value.trim();if(!b)return;
-      api('POST','/api/messages',{to:c.author.handle,clip:c.id,body:b}).then(function(){closeModal();toast('Message envoyé');}).catch(function(e){toast(e.message)});};
+      api('POST','/api/messages',{to:c.author.handle,clip:c.id,body:b}).then(function(r){if(!list.querySelector('div.rounded-2xl'))list.innerHTML='';list.insertAdjacentHTML('beforeend',bub({mine:true,body:r.body}));list.scrollTop=list.scrollHeight;$('mg-b').value='';}).catch(function(e){toast(e.message)});};
   }
   $('t-msg').onclick=function(){var c=cur();if(c)composeMessage(c);};
 
   /* Ask AI (/api/ask) with Copier */
+  var aiN=0;
   $('t-ai').onclick=function(){
     var c=cur();if(!c)return;
     var chips=[['Hashtags','Propose-moi des hashtags'],['Commentaire','Écris un commentaire pour ce clip'],['Résumé','Résume ce clip'],['Titre','Propose un titre']];
-    openModal(head('Demander à l\'IA')+'<div class="mb-3 flex flex-wrap gap-2">'+chips.map(function(x){return '<button type="button" data-p="'+esc(x[1])+'" class="rounded-full border border-neutral-600 bg-neutral-800 px-3 py-1.5 text-xs font-bold">'+x[0]+'</button>'}).join('')+'</div>'+
+    openModal(head('Ask AI')+'<div class="mb-3 flex flex-wrap gap-2">'+chips.map(function(x){return '<button type="button" data-p="'+esc(x[1])+'" class="rounded-full border border-neutral-600 bg-neutral-800 px-3 py-1.5 text-xs font-bold">'+x[0]+'</button>'}).join('')+'</div>'+
       '<form id="ai" class="flex gap-2" action="javascript:void(0)"><input id="ai-in" maxlength="500" autocomplete="off" placeholder="Posez votre question sur ce clip…" class="'+field+'"><button id="ai-go" class="'+btn+'">Envoyer</button></form>'+
       '<div id="ai-out" class="mt-3 hidden"><div id="ai-txt" class="whitespace-pre-wrap break-words rounded-2xl bg-neutral-800 p-3 text-sm"></div><button id="ai-copy" class="mt-2 flex items-center gap-1.5 rounded-full border border-neutral-600 px-4 py-2 text-sm font-bold"><i data-lucide="copy" class="h-4 w-4"></i><span>Copier</span></button></div>');
     modal.querySelectorAll('[data-p]').forEach(function(b){b.onclick=function(){$('ai-in').value=b.dataset.p;$('ai').requestSubmit();};});
     $('ai').onsubmit=function(e){e.preventDefault();var q=$('ai-in').value.trim();if(!q)return;
       $('ai-go').disabled=true;$('ai-out').classList.remove('hidden');$('ai-txt').textContent='Réflexion en cours…';
-      api('POST','/api/ask',{prompt:q,clip:{caption:cap(c),author:c.author.name}}).then(function(r){$('ai-txt').textContent=r.reply;}).catch(function(e){$('ai-txt').textContent=e.message}).then(function(){$('ai-go').disabled=false});};
+      api('POST','/api/ask',{prompt:q,clip:{caption:cap(c),author:c.author.name}}).then(function(r){$('ai-txt').textContent=r.reply;aiN++;var bd=$('ai-badge');bd.textContent=aiN;bd.hidden=false;}).catch(function(e){$('ai-txt').textContent=e.message}).then(function(){$('ai-go').disabled=false});};
     $('ai-copy').onclick=function(){var t=$('ai-txt').textContent;if(!t||t==='Réflexion en cours…')return;copyText(t).then(function(){var s=$('ai-copy').lastElementChild;s.textContent='Copié ✓';setTimeout(function(){s.textContent='Copier'},1600);});};
   };
 
@@ -358,7 +370,7 @@
 
   /* ---------- menu (left) ---------- */
   $('b-menu').onclick=function(){
-    openModal(head('Menu')+'<div class="flex flex-col gap-2">'+[['home','Accueil','house'],['search','Recherche','search'],['clips','Clips','clapperboard'],['messages','Messages','mail'],['profile','Profil','user-round'],['upload','Importer un clip','upload']].map(function(x){return '<button data-go="'+x[0]+'" class="flex h-12 items-center gap-3 rounded-xl bg-neutral-800 px-4 text-left text-[15px] font-semibold"><i data-lucide="'+x[2]+'" class="h-5 w-5"></i>'+x[1]+'</button>'}).join('')+'</div>');
+    openModal(head('Menu')+'<div class="flex flex-col gap-2">'+[['home','Accueil','house'],['search','Recherche','search'],['clips','Clips','clapperboard'],['messages','Messages','mail'],['profile','Profil','user-round'],['upload','Importer un clip','plus']].map(function(x){return '<button data-go="'+x[0]+'" class="flex h-12 items-center gap-3 rounded-xl bg-neutral-800 px-4 text-left text-[15px] font-semibold"><i data-lucide="'+x[2]+'" class="h-5 w-5"></i>'+x[1]+'</button>'}).join('')+'</div>');
     modal.querySelectorAll('[data-go]').forEach(function(b){b.onclick=function(){var g=b.dataset.go;closeModal();if(g==='upload')$('up-open').click();else showPage(g);};});
   };
   /* importer: pick the file first (the studio sheet is opened by upload.js) */
