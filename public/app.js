@@ -9,7 +9,7 @@
   var me = null, unread = 0;
   var feedClips = [], seen = {}, feedNext = null, feedI = 0, busy = false;
   var L = feedClips, idx = 0, shownId = null, viewer = false, vlist = null;
-  var soundOn = false, loops = 0, lastT = 0;
+  var soundOn = false, loops = 0, userPaused = false, maxI = 0;
 
   /* ================= helpers ================= */
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -48,18 +48,18 @@
   function openOverlay(closeFn) {
     if (ov) { dropOv(); history.replaceState({ i: depth(), ov: 1 }, '', location.href); }
     else history.pushState({ i: depth() + 1, ov: 1 }, '', location.href);
-    ov = { close: closeFn };
+    ov = { close: closeFn }; updateBar();
   }
   function closeOverlay() { if (ov) history.back(); }
   function nav(path, o) {
     o = o || {};
     if (ov) { dropOv(); history.replaceState({ i: depth() }, '', path); }
     else if (o.replace) history.replaceState({ i: depth() }, '', path);
-    else if (path !== location.pathname + location.search) history.pushState({ i: depth() + 1 }, '', path);
+    else if (path !== location.pathname + location.search) { history.pushState({ i: depth() + 1 }, '', path); maxI = depth(); }
     render();
   }
   function goBack() { if (ov) closeOverlay(); else if (depth() > 0) history.back(); else nav('/', { replace: true }); }
-  window.addEventListener('popstate', function () { if (ov) { dropOv(); return; } render(); });
+  window.addEventListener('popstate', function () { if (ov) { dropOv(); maxI = depth(); updateBar(); return; } render(); });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { if (ov) closeOverlay(); else if (location.pathname !== '/') goBack(); return; }
     if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || ov) return;
@@ -108,9 +108,12 @@
   function reloadFeed() { shownId = null; return loadFeed(); }
   var cur = function () { return L[idx]; };
 
-  /* ================= video: autoplay loop, 3 replays then a Replay button ================= */
-  /* One visible <video> plays; the only other element is a detached, muted preloader for the NEXT clip. */
-  var nv = document.createElement('video'); nv.preload = 'auto'; nv.muted = true; nv.setAttribute('playsinline', '');
+  /* ================= video: muted autoplay, 3 loops per clip, then the next clip starts by itself ================= */
+  /* Two real <video> elements trade places: `v` is on screen, `buf` already holds the NEXT clip, and a detached `warm`
+     element fetches the one after it. Advancing swaps v and buf, so the next clip starts with no black frame. */
+  var buf = v.cloneNode(false); buf.id = 'vid2'; buf.preload = 'auto'; buf.classList.add('invisible'); buf.removeAttribute('poster');
+  v.parentNode.insertBefore(buf, v.nextSibling);
+  var warm = document.createElement('video'); warm.preload = 'auto'; warm.muted = true; warm.setAttribute('playsinline', '');
   // 360p on a slow or data-saving connection (or after a stall), 720p otherwise; the choice sticks for the session
   function quality() { try { return localStorage.getItem('quality') === 'saver' ? 'saver' : 'auto'; } catch (e) { return 'auto'; } }
   function lowNet() {
@@ -120,42 +123,72 @@
     return !!(k.saveData || /(^|-)2g|3g/.test(k.effectiveType || '') || (k.downlink && k.downlink < 1.5));
   }
   function srcOf(c) { return lowNet() && c.url360 ? c.url360 : c.url; }
+  var nextOf = function (i) { return L.length > 1 ? (i + 1) % L.length : -1; };
+  function aim(el, c) {
+    if (!c) { if (el.getAttribute('src')) { el.removeAttribute('src'); el.load(); } delete el.dataset.id; return; }
+    var s = srcOf(c);
+    if (el.dataset.id !== c.id || el.getAttribute('src') !== s) { el.dataset.id = c.id; el.src = s; el.load(); }
+  }
+  function prime() { var n = nextOf(idx), m = n < 0 ? -1 : nextOf(n); aim(buf, n < 0 ? null : L[n]); aim(warm, m < 0 || m === idx ? null : L[m]); }
   var stalls = [];
-  v.addEventListener('waiting', function () {
+  function onWaiting() {
+    if (this !== v) return;
     var c = cur(), t = Date.now(); if (!c || !c.url360 || v.src === c.url360 || v.currentTime < 0.3) return;
     stalls = stalls.filter(function (x) { return t - x < 10000; }); stalls.push(t);
-    if (stalls.length >= 2) { stalls = []; try { sessionStorage.setItem('rend', 'low'); } catch (e) { /* ignore */ } var at = v.currentTime; v.src = c.url360; v.addEventListener('loadedmetadata', function h() { v.removeEventListener('loadedmetadata', h); try { v.currentTime = at; } catch (e) { /* ignore */ } tryPlay(); }); v.load(); }
-  });
-  // only the visible tab/route plays
+    if (stalls.length >= 2) { stalls = []; try { sessionStorage.setItem('rend', 'low'); } catch (e) { /* ignore */ } var at = v.currentTime; v.src = c.url360; v.addEventListener('loadedmetadata', function h() { v.removeEventListener('loadedmetadata', h); try { v.currentTime = at; } catch (e) { /* ignore */ } if (!userPaused) tryPlay(); }); v.load(); }
+  }
+  // only the visible tab/route plays, and never over a clip the user paused
   function feedVisible() { return !document.hidden && page.hidden && !!shownId; }
-  document.addEventListener('visibilitychange', function () { if (document.hidden) v.pause(); else if (feedVisible() && $('replay').hidden) tryPlay(); });
-  function resetLoops() { loops = 0; lastT = 0; $('replay').hidden = true; }
+  function canRun() { return feedVisible() && !userPaused && $('replay').hidden; }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) v.pause(); else if (canRun()) tryPlay(); });
+  function resetLoops() { loops = 0; $('replay').hidden = true; }
   function tryPlay() { var p = v.play(); if (p && p.catch) p.catch(function () { if (!v.muted) { v.muted = true; soundOn = false; paintSound(); v.play().catch(function () { /* user taps to start */ }); } }); }
-  setInterval(function () {
-    if (v.paused || v.ended || !shownId) return;
-    var t = v.currentTime;
-    if (lastT > 0.5 && t < lastT - 0.4) {              // the clip wrapped around: one more play finished
-      loops++;
-      if (loops >= 3) { v.pause(); $('replay').hidden = false; }
-    }
-    lastT = t;
-  }, 100);
-  $('replay').onclick = function () { resetLoops(); v.currentTime = 0; tryPlay(); };
-  v.addEventListener('click', function () { if (v.paused) { if (!$('replay').hidden) $('replay').click(); else tryPlay(); } else v.pause(); });
+  // loopCount: every `ended` is one finished play; after the 3rd one the chain moves to the next clip
+  function onEnded() {
+    if (this !== v || !shownId) return;
+    if (ov) { v.currentTime = 0; tryPlay(); return; }          // a sheet is open over this clip: keep it here
+    loops++;
+    if (loops < 3) { v.currentTime = 0; tryPlay(); return; }
+    if (L.length > 1) jumpTo((idx + 1) % L.length, 1); else $('replay').hidden = false;
+  }
+  function onTap() {
+    if (this !== v) return;
+    if (!$('replay').hidden) { $('replay').click(); return; }
+    if (v.muted && !v.paused) { soundOn = true; v.muted = false; paintSound(); return; }   // first tap: sound on
+    if (v.paused) { userPaused = false; tryPlay(); } else { userPaused = true; v.pause(); }
+  }
+  [v, buf].forEach(function (el) { el.addEventListener('waiting', onWaiting); el.addEventListener('ended', onEnded); el.addEventListener('click', onTap); });
+  // IntersectionObserver: the clip plays only while at least half of it is on screen
+  var io = 'IntersectionObserver' in window ? new IntersectionObserver(function (es) {
+    es.forEach(function (en) {
+      if (en.target !== v || !v.getAttribute('src')) return;
+      if (en.isIntersecting && en.intersectionRatio >= 0.5) { if (canRun()) tryPlay(); } else v.pause();
+    });
+  }, { threshold: [0, 0.5, 1] }) : null;
+  if (io) io.observe(v);
+  $('replay').onclick = function () { resetLoops(); userPaused = false; v.currentTime = 0; tryPlay(); };
   function paintSound() { $('r-snd').querySelector('i,svg').outerHTML = '<i data-lucide="' + (soundOn ? 'volume-2' : 'volume-x') + '" class="h-5 w-5"></i>'; icons(); }
   $('r-snd').onclick = function () { soundOn = !soundOn; v.muted = !soundOn; paintSound(); };
 
   function show(dir) {
     var c = cur(); if (!c) return;
-    if (shownId === c.id && v.src) { tryPlay(); paint(); return; }
-    shownId = c.id; resetLoops();
-    if (c.poster) { poster.src = c.poster; poster.classList.remove('hidden'); v.poster = c.poster; } else { poster.classList.add('hidden'); v.removeAttribute('poster'); }
-    v.muted = !soundOn; v.src = srcOf(c); v.load();
-    v.addEventListener('playing', function h() { v.removeEventListener('playing', h); poster.classList.add('hidden'); });
+    if (shownId === c.id && v.getAttribute('src')) { if (!userPaused) tryPlay(); paint(); updateBar(); return; }
+    shownId = c.id; resetLoops(); userPaused = false;
+    if (buf.dataset.id === c.id && buf.readyState >= 2 && L.length > 1) {   // the next clip is already buffered: swap, no black frame
+      var old = v; v = buf; buf = old;
+      if (io) { io.unobserve(buf); io.observe(v); }
+      v.classList.remove('invisible'); buf.classList.add('invisible'); buf.pause();
+      v.muted = !soundOn; try { v.currentTime = 0; } catch (e) { /* ignore */ }
+      poster.classList.add('hidden');
+    } else {
+      if (c.poster) { poster.src = c.poster; poster.classList.remove('hidden'); v.poster = c.poster; } else { poster.classList.add('hidden'); v.removeAttribute('poster'); }
+      v.muted = !soundOn; v.dataset.id = c.id; v.src = srcOf(c); v.load();
+      v.addEventListener('playing', function h() { v.removeEventListener('playing', h); poster.classList.add('hidden'); });
+    }
     tryPlay();
-    var n = L[idx + 1]; if (n) { var ns = srcOf(n); if (nv.src !== ns) { nv.src = ns; nv.load(); } } else nv.removeAttribute('src');
+    prime();
     if (L === feedClips && idx >= L.length - 3) more();
-    paint();
+    paint(); updateBar();
     if (dir) { v.classList.remove('slide-up', 'slide-down'); void v.offsetWidth; v.classList.add(dir > 0 ? 'slide-up' : 'slide-down'); }
   }
   function paint() {
@@ -174,10 +207,48 @@
     var f = $('follow'); f.hidden = !!mine; f.textContent = vw.following ? 'Abonné ✓' : 'Suivre'; f.classList.toggle('bg-white', !!vw.following); f.classList.toggle('text-black', !!vw.following);
     $('t-msg').disabled = !!mine; $('t-msg').classList.toggle('opacity-40', !!mine);
   }
-  function go(d) {
-    var n = idx + d; if (n < 0 || n >= L.length) return;
-    idx = n; if (L === feedClips) feedI = n; show(d);
+  function jumpTo(n, dir) { idx = n; if (L === feedClips) feedI = n; show(dir); }
+  function go(d) { var n = idx + d; if (n < 0 || n >= L.length) return; jumpTo(n, d); }
+
+  /* ================= fixed top bar: < Home Arena Clips > X ================= */
+  var canClip = function (d) { var n = idx + d; return !ov && page.hidden && !!shownId && n >= 0 && n < L.length; };
+  var canHist = function (d) { return d < 0 ? depth() > 0 : depth() < maxI; };
+  function dis(b, off) { b.setAttribute('aria-disabled', off ? 'true' : 'false'); b.style.opacity = off ? '.35' : ''; }
+  function updateBar() {
+    dis($('b-prev'), !(ov || canClip(-1) || canHist(-1)));
+    dis($('b-next'), !(!ov && (canClip(1) || canHist(1))));
+    dis($('b-x'), !ov && location.pathname === '/');
   }
+  // on the feed or the viewer the arrows step through clips; on other pages (and at the ends) they walk the history
+  function prevNext(d) {
+    if (ov) { if (d < 0) closeOverlay(); return; }
+    if (canClip(d)) go(d); else if (canHist(d)) history.go(d);
+  }
+  $('b-prev').onclick = function () { prevNext(-1); };
+  $('b-next').onclick = function () { prevNext(1); };
+  // X closes the open sheet, else the clip viewer, else leaves the page for the feed; it never closes the site
+  $('b-x').onclick = function () { if (ov) closeOverlay(); else if (viewer) goBack(); else if (location.pathname !== '/') nav('/'); };
+
+  // swipe right = previous, swipe left = next (anywhere except inputs and horizontally scrolling rows)
+  var sx = null, sy = 0;
+  function hScroll(el) { for (; el && el !== document.body; el = el.parentElement) { if (el.scrollWidth > el.clientWidth + 2 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true; } return false; }
+  document.addEventListener('touchstart', function (e) {
+    sx = null; if (e.touches.length !== 1 || e.target.closest('input,textarea,select,#hdr') || hScroll(e.target)) return;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchend', function (e) {
+    if (sx === null) return; var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; sx = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) prevNext(dx > 0 ? -1 : 1);
+  });
+
+  /* keyboard: the visible area shrinks to what the keyboard leaves, the bar follows it, the focused field scrolls into view */
+  var vv = window.visualViewport;
+  function fit() { if (!vv) return; $('phone').style.setProperty('--vh', vv.height + 'px'); $('hdr').style.transform = 'translateY(' + vv.offsetTop + 'px)'; }
+  if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); fit(); }
+  document.addEventListener('focusin', function (e) {
+    if (!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    setTimeout(function () { try { e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { /* ignore */ } }, 300);
+  });
 
   /* gestures: feed = swipe up/down for next/previous; fullscreen viewer = swipe down closes */
   var y0 = null, x0 = 0, ph = $('phone');
@@ -456,10 +527,9 @@
   var ready = false;
   function setChrome(p) {
     var feedRoute = p === '/';
-    $('b-back').hidden = feedRoute;
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tabOf(p)); });
-    $('v-x').hidden = !viewer;
     $('hdr').classList.toggle('bare', feedRoute || viewer);
+    updateBar();
   }
   function render() {
     if (!ready) return;
@@ -496,8 +566,6 @@
   /* chrome: Home, logo, back, close, bottom nav */
   $('b-home').onclick = function () { nav('/'); };
   $('logo').onclick = function () { nav('/'); };
-  $('b-back').onclick = goBack;
-  $('v-x').onclick = goBack;
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
       var g = t.dataset.tab;
