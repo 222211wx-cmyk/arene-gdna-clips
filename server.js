@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
 import { ask as askAI, askClip } from './ai.js';
+import { transcode, FILTERS } from './transcode.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as db from './db.js';
 import { dbConfigured, migrate, getDefaultUserId, feed as dbFeed, clipById, upsertClip, knownKeys } from './db.js';
@@ -50,7 +51,7 @@ const s3 = configured && new S3Client({
 
 const PART_SIZE = 10 * 1024 * 1024;          // multipart part size (R2 minimum is 5 MB except last)
 const SINGLE_MAX = 10 * 1024 * 1024;         // <= 10 MB: one presigned PUT; above: multipart
-const MAX_SIZE = 200 * 1024 * 1024;          // upload cap
+const MAX_SIZE = 4 * 1024 * 1024 * 1024;          // upload cap
 const TYPES = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 const keyOk = (k) => typeof k === 'string' && /^clips\/[\w.-]+\.(mp4|mov|webm)$/.test(k);
 const idOf = (k) => k.slice(6, k.lastIndexOf('.'));
@@ -168,10 +169,13 @@ api.post(['/upload-complete', '/upload/complete'], wrap(async (req, res) => {
 }));
 
 // Clip URLs: CDN when R2_PUBLIC_URL is set, otherwise short-lived signed R2 URLs.
-const mediaUrl = async (key) => CDN ? `${CDN}/${key}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
+const mediaUrl = async (key, ver) => CDN ? `${CDN}/${key}${ver ? `?v=${ver}` : ''}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
+const ver = (row) => Math.floor(new Date(row.created_at).getTime() / 1000);
 const present = async (row, vs = {}) => ({
-  id: row.id, key: row.key, url: await mediaUrl(row.key),
-  poster: row.poster_key ? await mediaUrl(row.poster_key) : null,
+  id: row.id, key: row.key,
+  // the feed never serves the original: 720p, and a 360p fallback (legacy clips without renditions keep the original until backfilled)
+  url: await mediaUrl(row.v720_key || row.key, ver(row)), url360: row.v360_key ? await mediaUrl(row.v360_key, ver(row)) : null,
+  poster: row.poster_key ? await mediaUrl(row.poster_key, ver(row)) : null,
   title: row.title, description: row.description, comment: row.comment,
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
   author: { handle: row.handle, name: row.display_name },
@@ -186,11 +190,24 @@ const secure = (req) => req.secure || req.headers['x-forwarded-proto'] === 'http
 const setSid = (req, res, token) => res.cookie(SID, token, { maxAge: 30 * 864e5, httpOnly: true, sameSite: 'lax', secure: secure(req), path: '/' });
 const presentUser = (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language } });
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-app.use('/api', wrapMw(async (req) => { req.user = dbConfigured ? await db.userBySession(sidOf(req)) : null; }));
+app.use('/api', wrapMw(async (req) => {
+  req.user = dbConfigured ? await db.userBySession(sidOf(req)) : null;
+  const gid = (/(?:^|;\s*)gid=([a-f0-9]{32})/.exec(req.headers.cookie || '') || [])[1];
+  req.guest = !req.user && gid && dbConfigured ? await db.guestByToken(gid) : null;
+  req.viewer = req.user || req.guest;
+}));
 function wrapMw(fn) { return (req, res, next) => fn(req).then(() => next(), (e) => { console.error(e); res.status(500).json({ error: e.message }); }); }
+// Like, save, comment, share and messages work for guests: a guest row is created on the first write.
+const needViewer = wrapMw2(async (req, res) => {
+  if (req.viewer) return;
+  if (!dbConfigured) throw Object.assign(new Error('Base de données non configurée'), { status: 503 });
+  const g = await db.createGuest(); req.guest = req.viewer = g.user;
+  res.cookie('gid', g.token, { maxAge: 365 * 864e5, httpOnly: true, sameSite: 'lax', secure: secure(req), path: '/' });
+});
+function wrapMw2(fn) { return (req, res, next) => fn(req, res).then(() => next(), (e) => res.status(e.status || 500).json({ error: e.message })); }
 const needUser = (req, res, next) => req.user ? next() : res.status(401).json({ error: 'Connexion requise', code: 'auth' });
 const presentAll = async (req, rows) => {
-  const vs = await db.viewerState(req.user?.id, rows.map((r) => r.id));
+  const vs = await db.viewerState(req.viewer?.id, rows.map((r) => r.id));
   return Promise.all(rows.map((r) => present(r, vs[r.id])));
 };
 const needDb = (req, res, next) => dbConfigured ? next() : res.status(503).json({ error: 'Base de données non configurée (DATABASE_URL)' });
@@ -234,19 +251,19 @@ const clipOr404 = async (req, res) => {
   return row;
 };
 const flag = (req) => (typeof req.body?.on === 'boolean' ? req.body.on : true);
-social.put('/clips/:id/like', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setLike(req.user.id, c.id, flag(req))); }));
-social.put('/clips/:id/save', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setSave(req.user.id, c.id, flag(req))); }));
+social.put('/clips/:id/like', needViewer, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setLike(req.viewer.id, c.id, flag(req))); }));
+social.put('/clips/:id/save', needViewer, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setSave(req.viewer.id, c.id, flag(req))); }));
 social.post('/clips/:id/share', wrap(async (req, res) => {
   const c = await clipOr404(req, res); if (!c) return;
   const ch = ['link', 'native', 'whatsapp', 'message'].includes(req.body?.channel) ? req.body.channel : 'link';
-  res.json(await db.addShare(req.user?.id, c.id, ch));
+  res.json(await db.addShare(req.viewer?.id, c.id, ch));
 }));
 social.get('/clips/:id/comments', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json({ comments: await db.listComments(c.id) }); }));
-social.post('/clips/:id/comments', needUser, wrap(async (req, res) => {
+social.post('/clips/:id/comments', needViewer, wrap(async (req, res) => {
   const c = await clipOr404(req, res); if (!c) return;
   const body = String(req.body?.body || '').trim().slice(0, 500);
   if (!body) return res.status(400).json({ error: 'commentaire vide' });
-  res.json({ ...(await db.addComment(req.user.id, c.id, body)), name: req.user.display_name });
+  res.json({ ...(await db.addComment(req.viewer.id, c.id, body)), name: req.viewer.display_name });
 }));
 const followHandle = async (req, res, handle) => {
   const u = await db.citizen(String(handle).slice(0, 80), null);
@@ -275,23 +292,23 @@ social.get('/users/:handle/followers', wrap(async (req, res) => {
   const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' });
   res.json({ followers: p.private ? [] : await db.followers(p._id), private: p.private });
 }));
-social.post('/messages', needUser, wrap(async (req, res) => {
+social.post('/messages', needViewer, wrap(async (req, res) => {
   const body = String(req.body?.body || '').trim().slice(0, 1000);
   if (!body) return res.status(400).json({ error: 'message vide' });
   const to = await db.citizen(String(req.body?.to || ''), null);
   if (!to) return res.status(404).json({ error: 'destinataire introuvable' });
-  if (req.user.id === to.id) return res.status(400).json({ error: 'destinataire invalide' });
+  if (req.viewer.id === to.id) return res.status(400).json({ error: 'destinataire invalide' });
   if (!to.allow_messages) return res.status(403).json({ error: 'Ce créateur n’accepte pas les messages' });
-  res.json(await db.sendMessage(req.user.id, to.id, clipId(req.body?.clip) ? req.body.clip : null, body));
+  res.json(await db.sendMessage(req.viewer.id, to.id, clipId(req.body?.clip) ? req.body.clip : null, body));
 }));
-social.get('/messages', needUser, wrap(async (req, res) => {
+social.get('/messages', needViewer, wrap(async (req, res) => {
   const w = String(req.query.with || '').slice(0, 80);
-  if (!w) return res.json({ conversations: await db.conversations(req.user.id) });
-  const t = await db.thread(req.user.id, w); if (!t) return res.status(404).json({ error: 'créateur introuvable' });
+  if (!w) return res.json({ conversations: await db.conversations(req.viewer.id) });
+  const t = await db.thread(req.viewer.id, w); if (!t) return res.status(404).json({ error: 'créateur introuvable' });
   res.json(t);
 }));
 social.get('/me', wrap(async (req, res) => res.json({ user: presentUser(req.user), unread: req.user ? await db.unreadCount(req.user.id) : 0 })));
-social.get('/me/saved', needUser, wrap(async (req, res) => res.json({ clips: await presentAll(req, await db.savedClips(req.user.id)) })));
+social.get('/me/saved', needViewer, wrap(async (req, res) => res.json({ clips: await presentAll(req, await db.savedClips(req.viewer.id)) })));
 social.patch('/me', needUser, wrap(async (req, res) => {
   const b = req.body || {}, s = {};
   for (const k of ['notifications', 'private_profile', 'allow_messages']) if (typeof b[k] === 'boolean') s[k] = b[k];
@@ -309,7 +326,7 @@ app.use('/api', social);
 
 // One DB row per clip (id is the primary key, so a retry can never create a duplicate).
 api.post('/publish', needDb, needUser, wrap(async (req, res) => {
-  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false } = req.body;
+  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false, trim = null, filter = '' } = req.body;
   if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
   if (String(title).trim().length < 2 || /\b(?:VID|IMG|MOV|MVI|PXL|DSC|WA)[-_ ]*\d/i.test(title)) return res.status(400).json({ error: 'Titre requis (pas un nom de fichier)' });
   const music = musicId ? musicById(musicId) : null;
@@ -317,8 +334,13 @@ api.post('/publish', needDb, needUser, wrap(async (req, res) => {
   const fx = { eclairage: Number(enhancement.eclairage) || 0, couleur: Number(enhancement.couleur) || 0, cartoon: !!enhancement.cartoon };
   let pk = null;
   if (poster) { try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: posterKey(key) })); pk = posterKey(key); } catch {} }
+  const tr = trim && Number.isFinite(+trim.start) && Number.isFinite(+trim.end) && +trim.start >= 0 && +trim.end - +trim.start >= 1 ? { start: +trim.start, end: +trim.end } : null;
+  if (filter && !FILTERS[filter]) return res.status(400).json({ error: 'filtre inconnu' });
+  let rend;
+  try { rend = await transcode({ s3, bucket: R2_BUCKET, key, id: idOf(key), trim: tr, filter }); }
+  catch (e) { console.error('[transcode]', e.message); return res.status(500).json({ error: 'Compression de la vidéo impossible : ' + e.message.slice(0, 160) }); }
   const row = await upsertClip({
-    id: idOf(key), userId: req.user.id, key, posterKey: pk, title: String(title).trim().slice(0, 120),
+    id: idOf(key), userId: req.user.id, key, posterKey: pk, v720Key: rend.v720, v360Key: rend.v360, title: String(title).trim().slice(0, 120),
     description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
     musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
   });
@@ -380,7 +402,19 @@ async function backfill() {
   } while (token);
   if (n) console.log(`[db] imported ${n} existing clip(s) from R2`);
 }
-migrate().then(() => { console.log(dbConfigured ? '[db] ready' : '[db] DATABASE_URL not set'); return backfill(); })
+// Clips published before compression existed get their 720p/360p renditions in the background, one at a time.
+async function backfillRenditions() {
+  if (!configured || !dbConfigured) return;
+  const { rows } = await db.pool.query('SELECT id, key FROM clips.clips WHERE v720_key IS NULL ORDER BY created_at DESC');
+  for (const r of rows) {
+    try {
+      const o = await transcode({ s3, bucket: R2_BUCKET, key: r.key, id: r.id });
+      await db.pool.query('UPDATE clips.clips SET v720_key = $2, v360_key = $3 WHERE id = $1', [r.id, o.v720, o.v360]);
+      console.log(`[transcode] backfilled ${r.id}`, o.sizes);
+    } catch (e) { console.error(`[transcode] backfill ${r.id} failed:`, e.message); }
+  }
+}
+migrate().then(() => { console.log(dbConfigured ? '[db] ready' : '[db] DATABASE_URL not set'); return backfill(); }).then(backfillRenditions)
   .catch((e) => console.error('[db] startup failed:', e.message));
 
 app.get('/api/config', async (req, res) => {
