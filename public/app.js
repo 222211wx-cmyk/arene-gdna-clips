@@ -112,8 +112,10 @@
   /* One visible <video> plays; the only other element is a detached, muted preloader for the NEXT clip. */
   var nv = document.createElement('video'); nv.preload = 'auto'; nv.muted = true; nv.setAttribute('playsinline', '');
   // 360p on a slow or data-saving connection (or after a stall), 720p otherwise; the choice sticks for the session
+  function quality() { try { return localStorage.getItem('quality') === 'saver' ? 'saver' : 'auto'; } catch (e) { return 'auto'; } }
   function lowNet() {
     var k = navigator.connection || {}, s = ''; try { s = sessionStorage.getItem('rend') || ''; } catch (e) { /* private mode */ }
+    if (quality() === 'saver') return true;
     if (s) return s === 'low';
     return !!(k.saveData || /(^|-)2g|3g/.test(k.effectiveType || '') || (k.downlink && k.downlink < 1.5));
   }
@@ -196,8 +198,8 @@
     api('PUT', '/api/clips/' + encodeURIComponent(c.id) + '/' + kind, { on: on }).then(function (r) { c[cnt] = r.count; if (cur() === c) paint(); })
       .catch(function (e) { vw[key] = was; c[cnt] = wasN; if (cur() === c) paint(); fail(e); });
   }
-  $('r-like').onclick = guard(function () { toggle('like'); });
-  $('r-save').onclick = guard(function () { toggle('save'); });
+  $('r-like').onclick = function () { toggle('like'); };
+  $('r-save').onclick = function () { toggle('save'); };
   function setFollowEverywhere(handle, on) { feedClips.concat(vlist || []).forEach(function (x) { if (x.author.handle === handle) (x.viewer || (x.viewer = {})).following = on; }); }
   $('follow').onclick = guard(function () {
     var c = cur(); if (!c) return; var on = !(c.viewer && c.viewer.following), h = c.author.handle;
@@ -223,12 +225,10 @@
   $('r-comment').onclick = function () {
     var c = cur(); if (!c) return;
     openModal(head('Commentaires') + '<div id="cm-list" class="mb-3 flex max-h-[45vh] flex-col gap-2 overflow-y-auto text-sm"><div class="text-neutral-400">Chargement…</div></div>' +
-      (me ? '<form id="cm-form" class="flex gap-2" action="javascript:void(0)"><input id="cm-in" maxlength="500" autocomplete="off" placeholder="Ajouter un commentaire…" class="' + field + '"><button class="' + btn + '">Envoyer</button></form>'
-        : '<button id="cm-login" class="' + btn + ' w-full">Se connecter pour commenter</button>'));
+      '<form id="cm-form" class="flex gap-2" action="javascript:void(0)"><input id="cm-in" maxlength="500" autocomplete="off" placeholder="Ajouter un commentaire…" class="' + field + '"><button class="' + btn + '">Envoyer</button></form>');
     var list = $('cm-list');
     function row(m) { return '<div class="rounded-xl bg-neutral-800 px-3 py-2"><div class="text-xs font-bold text-gold">' + esc(m.name) + ' <span class="font-normal text-neutral-400">' + ago(m.created_at) + '</span></div><div class="break-words">' + esc(m.body) + '</div></div>'; }
     api('GET', '/api/clips/' + encodeURIComponent(c.id) + '/comments').then(function (r) { list.innerHTML = r.comments.length ? r.comments.map(row).join('') : '<div class="text-neutral-400">Aucun commentaire pour le moment. Soyez le premier.</div>'; list.scrollTop = list.scrollHeight; }).catch(function (e) { list.textContent = e.message; });
-    if ($('cm-login')) $('cm-login').onclick = function () { nav('/login?next=' + encodeURIComponent(location.pathname)); };
     if ($('cm-form')) $('cm-form').onsubmit = function (e) {
       e.preventDefault(); var b = $('cm-in').value.trim(); if (!b) return;
       api('POST', '/api/clips/' + encodeURIComponent(c.id) + '/comments', { body: b }).then(function (r) {
@@ -255,7 +255,7 @@
 
   /* Message */
   function bubble(m) { return '<div class="' + (m.mine ? 'self-end bg-amber-400 text-black' : 'self-start bg-neutral-800') + ' max-w-[85%] break-words rounded-2xl px-3 py-2">' + esc(m.body) + '</div>'; }
-  $('t-msg').onclick = guard(function () {
+  $('t-msg').onclick = (function () {
     var c = cur(); if (!c) return; var h = c.author.handle;
     openModal(head('Message · ' + esc(c.author.name)) + '<div id="mg-list" class="mb-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto text-sm"><div class="text-neutral-400">Chargement…</div></div><form id="mg" class="flex gap-2" action="javascript:void(0)"><input id="mg-b" maxlength="1000" autocomplete="off" placeholder="Écrire à @' + esc(h) + '…" class="' + field + '"><button class="' + btn + '">Envoyer</button></form>');
     var list = $('mg-list');
@@ -350,7 +350,6 @@
 
   /* ---- messages ---- */
   function messagesPage() {
-    if (!me) return authCta('Messages');
     setPage(pageHead('Messages') + msg('Chargement…'));
     api('GET', '/api/messages').then(function (r) {
       var cs = r.conversations;
@@ -359,7 +358,6 @@
     }).catch(fail);
   }
   function threadPage(h) {
-    if (!me) return authCta('Messages');
     setPage(pageHead('Conversation') + msg('Chargement…'));
     api('GET', '/api/messages?with=' + encodeURIComponent(h)).then(function (r) {
       setPage(pageHead(esc(r.with.name) + ' <span class="text-sm font-normal text-neutral-400">@' + esc(r.with.handle) + '</span>') + '<div id="th" class="mb-3 flex flex-col gap-2 text-sm">' + (r.messages.length ? r.messages.map(bubble).join('') : msg('Aucun message. Écrivez le premier.')) + '</div><form id="th-f" class="sticky bottom-0 flex gap-2 bg-neutral-950 pt-2" action="javascript:void(0)"><input id="th-b" maxlength="1000" autocomplete="off" placeholder="Votre message…" class="' + field + '"><button class="' + btn + '">Envoyer</button></form>');
@@ -372,7 +370,7 @@
   function statBox(n, l, id) { return '<button ' + (id ? 'data-tabgo="' + id + '"' : '') + ' class="rounded-xl bg-neutral-900 py-2 text-center"><div class="text-xl font-extrabold">' + n + '</div><div class="text-xs text-neutral-400">' + l + '</div></button>'; }
   function profilePage(handle) {
     var mine = !handle || (me && handle === me.handle);
-    if (mine && !me) return authCta('Profil');
+    if (mine && !me) { authCta('Profil'); page.insertAdjacentHTML('beforeend', '<button id="cta-set" class="' + btn2 + ' mt-3 w-full">Paramètres</button>'); $('cta-set').onclick = function () { nav('/settings'); }; return; }
     var h = mine ? me.handle : handle;
     setPage(pageHead('Profil') + msg('Chargement…'));
     api('GET', '/api/users/' + encodeURIComponent(h)).then(function (u) {
@@ -388,7 +386,7 @@
         var fol = u.following_by_me, fb = $('p-follow');
         var pf = function () { fb.textContent = fol ? 'Abonné ✓' : 'Suivre'; }; pf();
         fb.onclick = guard(function () { var on = !fol; api('PUT', '/api/users/' + encodeURIComponent(u.handle) + '/follow', { on: on }).then(function (r) { fol = on; $('p-fol').textContent = r.followers; setFollowEverywhere(u.handle, on); pf(); }).catch(fail); });
-        $('p-msg').onclick = guard(function () { if (!u.allowMessages) return toast('Ce créateur n’accepte pas les messages'); nav('/messages/' + encodeURIComponent(u.handle)); });
+        $('p-msg').onclick = (function () { if (!u.allowMessages) return toast('Ce créateur n’accepte pas les messages'); nav('/messages/' + encodeURIComponent(u.handle)); });
       }
       function tab(t) {
         page.querySelectorAll('.tabbtn').forEach(function (b) { var on = b.dataset.t === t; b.className = 'tabbtn flex-1 rounded-full border px-3 py-2 text-sm font-bold ' + (on ? 'border-amber-400 bg-amber-400 text-black' : 'border-neutral-700 text-neutral-300'); });
@@ -431,16 +429,20 @@
 
   /* ---- settings ---- */
   function settingsPage() {
-    if (!me) return authCta('Paramètres');
-    var s = me.settings;
+    var q = quality(), s = me ? me.settings : {};
+    var qBtn = function (v, t, d) { return '<button data-q="' + v + '" role="radio" aria-checked="' + (q === v) + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (q === v ? 'bg-amber-400 text-black' : 'bg-neutral-900') + '"><span><b>' + t + '</b><span class="block text-xs ' + (q === v ? 'text-black/70' : 'text-neutral-400') + '">' + d + '</span></span><span>' + (q === v ? '✓' : '') + '</span></button>'; };
+    var qSec = '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Qualité vidéo</h3><div id="s-q" role="radiogroup" class="mb-5 flex flex-col gap-2">' + qBtn('auto', 'Auto', '720p, passe en 360p si le réseau ralentit') + qBtn('saver', 'Économiseur de données', 'Toujours 360p') + '</div>';
+    var bindQ = function () { page.querySelectorAll('[data-q]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('quality', b.dataset.q); sessionStorage.removeItem('rend'); } catch (e) { /* ignore */ } shownId = null; settingsPage(); }; }); };
+    if (!me) { setPage(pageHead('Paramètres') + qSec); bindQ(); return; }
     var sw = function (k, t, d) { return '<div class="flex items-center justify-between gap-3 rounded-xl bg-neutral-900 p-3"><div class="text-sm"><b>' + t + '</b><div class="text-xs text-neutral-400">' + d + '</div></div><button role="switch" data-k="' + k + '" aria-checked="' + !!s[k] + '" aria-label="' + t + '" class="relative h-7 w-12 shrink-0 rounded-full ' + (s[k] ? 'bg-amber-400' : 'bg-neutral-700') + '"><span class="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ' + (s[k] ? 'left-[22px]' : 'left-0.5') + '"></span></button></div>'; };
-    setPage(pageHead('Paramètres') +
+    setPage(pageHead('Paramètres') + qSec +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Compte</h3><div class="mb-5 flex flex-col gap-2"><div class="rounded-xl bg-neutral-900 p-3 text-sm"><div class="text-xs text-neutral-400">E-mail</div>' + esc(me.email) + '</div><form id="s-name" class="flex gap-2" action="javascript:void(0)"><input id="s-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Enregistrer</button></form></div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Langue</h3><div class="mb-5"><select id="s-lang" aria-label="Langue" class="' + inp + '"><option value="fr" selected>Français</option></select></div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Notifications</h3><div class="mb-5">' + sw('notifications', 'Notifications', 'Pastille de nouveaux messages sur l’onglet Messages') + '</div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Confidentialité</h3><div class="mb-5 flex flex-col gap-2">' + sw('private_profile', 'Profil privé', 'Vos clips n’apparaissent plus dans la recherche ni sur votre profil public') + sw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire') + '</div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Session</h3><button id="s-out" class="' + btn2 + ' mb-5 w-full">Se déconnecter</button>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-red-400">Zone dangereuse</h3><button id="s-del" class="w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button>');
+    bindQ();
     page.querySelectorAll('[data-k]').forEach(function (b) { b.onclick = function () { var k = b.dataset.k, p = {}; p[k] = !me.settings[k]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (k === 'notifications') badge(); settingsPage(); }).catch(fail); }; });
     $('s-name').onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('s-dn').value }).then(function (r) { me = r.user; toast('Nom enregistré'); }).catch(fail); };
     $('s-out').onclick = logout;

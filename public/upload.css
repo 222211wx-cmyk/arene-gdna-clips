@@ -51,3 +51,10 @@
 .sh-sheet[hidden]{display:none}
 
 #st-title{width:100%;min-height:48px;border-radius:14px;border:1px solid #333;background:#1a1a1a;color:#fff;padding:0 12px;font-size:15px;font-family:inherit}
+
+.st-tool{display:flex;flex-direction:column;gap:6px;margin:4px 0 10px}
+.st-tool label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:#bbb}
+.st-tool input[type=range]{width:100%;accent-color:#fbbf24}
+.st-filters{display:flex;gap:8px;overflow-x:auto;margin:4px 0 10px;padding-bottom:2px}
+.st-filters button{flex:0 0 auto;padding:8px 14px;border-radius:999px;border:1px solid #555;background:#222;color:#fff;font-size:13px;font-weight:700}
+.st-filters button.on{background:#fbbf24;color:#000;border-color:#fbbf24}

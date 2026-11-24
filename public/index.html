@@ -117,6 +117,15 @@
     </div>
     <div class="st-step" id="st-2" hidden>
       <video id="st-prev" class="st-prev" playsinline controls loop></video>
+      <div class="st-lbl">Couper (Trim)</div>
+      <div class="st-tool"><label>Début <b id="st-t0v">0.0</b> s<input id="st-t0" type="range" min="0" max="1" step="0.1" value="0"></label>
+        <label>Fin <b id="st-t1v">0.0</b> s<input id="st-t1" type="range" min="0" max="1" step="0.1" value="1"></label></div>
+      <div class="st-lbl">Couverture (Cover)</div>
+      <div class="st-tool"><label>Image à <b id="st-cvv">0.0</b> s<input id="st-cv" type="range" min="0" max="1" step="0.1" value="0"></label></div>
+      <div class="st-lbl">Filtres</div>
+      <div class="st-filters" id="st-filters">
+        <button data-f="" class="on">Normal</button><button data-f="vif">Vif</button><button data-f="chaud">Chaud</button><button data-f="froid">Froid</button><button data-f="nb">N&amp;B</button><button data-f="vintage">Vintage</button>
+      </div>
       <div class="st-lbl">Titre (obligatoire)</div>
       <input id="st-title" maxlength="120" placeholder="Titre du clip" autocomplete="off">
       <div class="st-lbl">Description</div>

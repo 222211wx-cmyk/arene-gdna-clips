@@ -2,7 +2,7 @@
 // with 20 parallel presigned multipart parts, resumable across reloads / network loss.
 
 const THREADS = 6;
-const MAX_MB = 200, EXTS = ['mp4', 'mov', 'webm'];
+const MAX_MB = 4096, EXTS = ['mp4', 'mov', 'webm'];
 const extOf = (f) => { const e = (f.name.split('.').pop() || '').toLowerCase(); return EXTS.includes(e) ? e : f.type === 'video/quicktime' ? 'mov' : f.type === 'video/webm' ? 'webm' : f.type === 'video/mp4' ? 'mp4' : null; };
 const CAMERA = /\b(?:VID|IMG|MOV|MVI|PXL|DSC|PIC|WA|Screen[ _-]?Recording)[-_ ]*\d/i;
 const guessTitle = (f) => { const t = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(); return CAMERA.test(t) || /^[\d\s.]+$/.test(t) ? '' : t; };
@@ -17,9 +17,10 @@ const sheet = $('up-sheet'), bar = $('up-bar'), label = $('up-label'), result = 
 const setProgress = (txt, pct) => { label.textContent = txt; bar.style.width = pct + '%'; };
 
 /* ---------- Studio: 1 fichier -> 2 description (AI) -> 3 publier ---------- */
-const st = { file: null, music: null, fx: { eclairage: 0, couleur: 0, cartoon: false }, ctx: {} };
+const FCSS = { '': '', vif: 'saturate(1.4) contrast(1.1)', chaud: 'sepia(.25) saturate(1.2)', froid: 'hue-rotate(12deg) saturate(1.05)', nb: 'grayscale(1) contrast(1.1)', vintage: 'sepia(.5) contrast(.95)' };
+const st = { filter: '', t0: 0, t1: 0, dur: 0, cover: null, file: null, music: null, fx: { eclairage: 0, couleur: 0, cartoon: false }, ctx: {} };
 const fxCss = () => st.fx.cartoon ? 'contrast(1.35) saturate(2) brightness(1.05)' : `brightness(${1 + st.fx.eclairage / 100}) saturate(${1 + st.fx.couleur / 100})`;
-const applyFxPreview = () => { $('st-prev').style.filter = fxCss(); };
+const applyFxPreview = () => { $('st-prev').style.filter = st.filter ? FCSS[st.filter] : fxCss(); };
 
 $('up-file').onchange = async (e) => {
   const file = e.target.files[0]; e.target.value = '';
@@ -29,11 +30,24 @@ $('up-file').onchange = async (e) => {
   st.file = file; st.music = null; st.fx = { eclairage: 0, couleur: 0, cartoon: false };
   result.innerHTML = ''; setProgress('', 0); renderMusic(); applyFxPreview(); $('st-title').value = guessTitle(file);
   const pv = $('st-prev'); pv.src = URL.createObjectURL(file);
+  st.filter = ''; st.cover = null; st.dur = 0; document.querySelectorAll('#st-filters button').forEach((b) => b.classList.toggle('on', !b.dataset.f)); applyFxPreview();
+  pv.onloadedmetadata = () => { st.dur = pv.duration || 0; st.t0 = 0; st.t1 = st.dur; for (const id of ['st-t0', 'st-t1', 'st-cv']) $(id).max = st.dur.toFixed(1); $('st-t0').value = 0; $('st-t1').value = st.dur.toFixed(1); $('st-cv').value = 0; syncTools(); };
   $('st-1').hidden = true; $('st-2').hidden = false; $('up-title').textContent = 'Description';
   $('ai-list').innerHTML = ''; $('ai-reply').textContent = 'Analyse de la vidéo…';
   st.ctx = await analyze(file).catch(() => ({}));
   ask('');   // AI already has suggestions when the user lands here
 };
+
+/* ---------- Trim / Cover / Filtres ---------- */
+function syncTools() {
+  $('st-t0v').textContent = st.t0.toFixed(1); $('st-t1v').textContent = st.t1.toFixed(1);
+  const c = Math.min(Math.max(st.cover ?? st.t0, st.t0), st.t1); $('st-cv').min = st.t0.toFixed(1); $('st-cv').max = st.t1.toFixed(1); $('st-cv').value = c; $('st-cvv').textContent = c.toFixed(1);
+}
+$('st-t0').oninput = (e) => { st.t0 = Math.min(+e.target.value, st.t1 - 1); if (st.t0 < 0) st.t0 = 0; e.target.value = st.t0; const pv = $('st-prev'); pv.pause(); pv.currentTime = st.t0; syncTools(); };
+$('st-t1').oninput = (e) => { st.t1 = Math.max(+e.target.value, st.t0 + 1); if (st.t1 > st.dur) st.t1 = st.dur; e.target.value = st.t1; const pv = $('st-prev'); pv.pause(); pv.currentTime = Math.max(st.t0, st.t1 - 0.1); syncTools(); };
+$('st-cv').oninput = (e) => { st.cover = +e.target.value; const pv = $('st-prev'); pv.pause(); pv.currentTime = st.cover; syncTools(); };
+$('st-prev').ontimeupdate = (e) => { const pv = e.target; if (st.dur && !pv.paused && pv.currentTime >= st.t1) pv.currentTime = st.t0; };   // preview loops inside the trim
+$('st-filters').onclick = (e) => { const b = e.target.closest('button[data-f]'); if (!b) return; st.filter = b.dataset.f; document.querySelectorAll('#st-filters button').forEach((x) => x.classList.toggle('on', x === b)); applyFxPreview(); };
 
 async function analyze(file) {
   const v = document.createElement('video'); v.muted = true; v.preload = 'auto'; v.src = URL.createObjectURL(file);
@@ -150,7 +164,8 @@ $('st-pub').onclick = async () => {
     setProgress('Compression 720p + 360p…', 100);
     const rec = await api('/publish', {
       key, title, description: $('st-desc').value, comment: $('st-comment').value,
-      musicId: music ? music.id : null, enhancement: { ...st.fx }, poster,
+      musicId: music ? music.id : null, enhancement: { ...st.fx }, poster, filter: st.filter,
+      trim: st.dur && (st.t0 > 0.05 || st.t1 < st.dur - 0.05) ? { start: st.t0, end: st.t1 } : null,
     });
     setProgress('✅ Publié', 100);
     result.innerHTML = `<div>Publié ✅ ${esc(rec.title)} (${mb(file.size)} MB)${music ? ' | ♫ ' + esc(music.name) : ''}</div>`;
@@ -170,10 +185,10 @@ async function uploadPoster(file, key) {
   try {
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = URL.createObjectURL(file);
     await new Promise((ok, ko) => { v.onloadeddata = ok; v.onerror = ko; setTimeout(ko, 8000); });
-    v.currentTime = Math.min(0.5, (v.duration || 1) / 2);
+    v.currentTime = st.cover ?? Math.min(0.5, (v.duration || 1) / 2);
     await new Promise((ok) => { v.onseeked = ok; setTimeout(ok, 2000); });
     const w = Math.min(720, v.videoWidth), h = Math.round(w * v.videoHeight / v.videoWidth);
-    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; cv.getContext('2d').drawImage(v, 0, 0, w, h);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g2 = cv.getContext('2d'); if (st.filter && FCSS[st.filter]) g2.filter = FCSS[st.filter]; g2.drawImage(v, 0, 0, w, h);
     URL.revokeObjectURL(v.src);
     const blob = await new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.8));
     if (!blob) return false;
