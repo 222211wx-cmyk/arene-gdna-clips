@@ -4,7 +4,8 @@
 const THREADS = 6;
 const MAX_MB = 200, EXTS = ['mp4', 'mov', 'webm'];
 const extOf = (f) => { const e = (f.name.split('.').pop() || '').toLowerCase(); return EXTS.includes(e) ? e : f.type === 'video/quicktime' ? 'mov' : f.type === 'video/webm' ? 'webm' : f.type === 'video/mp4' ? 'mp4' : null; };
-const titleOf = (f) => f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+const CAMERA = /\b(?:VID|IMG|MOV|MVI|PXL|DSC|PIC|WA|Screen[ _-]?Recording)[-_ ]*\d/i;
+const guessTitle = (f) => { const t = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(); return CAMERA.test(t) || /^[\d\s.]+$/.test(t) ? '' : t; };
 const $ = (id) => document.getElementById(id);
 const mb = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
 const originals = new Map();   // clip key -> original File (this device, this session only)
@@ -12,8 +13,7 @@ let busy = false;
 
 /* ---------- UI ---------- */
 const sheet = $('up-sheet'), bar = $('up-bar'), label = $('up-label'), result = $('up-result');
-$('up-open').onclick = () => { sheet.hidden = false; };
-$('up-close').onclick = () => { if (!busy) sheet.hidden = true; };
+// open/close (X, Back, Esc) are handled by app.js through the history stack
 const setProgress = (txt, pct) => { label.textContent = txt; bar.style.width = pct + '%'; };
 
 /* ---------- Studio: 1 fichier -> 2 description (AI) -> 3 publier ---------- */
@@ -27,10 +27,10 @@ $('up-file').onchange = async (e) => {
   if (!extOf(file)) { setProgress('❌ Format non supporté: utilisez mp4, mov ou webm', 0); return; }
   if (file.size > MAX_MB * 1048576) { setProgress(`❌ Fichier trop gros (${mb(file.size)} MB, max ${MAX_MB} MB)`, 0); return; }
   st.file = file; st.music = null; st.fx = { eclairage: 0, couleur: 0, cartoon: false };
-  result.innerHTML = ''; setProgress('', 0); renderMusic(); applyFxPreview();
+  result.innerHTML = ''; setProgress('', 0); renderMusic(); applyFxPreview(); $('st-title').value = guessTitle(file);
   const pv = $('st-prev'); pv.src = URL.createObjectURL(file);
   $('st-1').hidden = true; $('st-2').hidden = false; $('up-title').textContent = 'Description';
-  $('ai-list').innerHTML = ''; $('ai-reply').textContent = 'كنشوف الفيديو…';
+  $('ai-list').innerHTML = ''; $('ai-reply').textContent = 'Analyse de la vidéo…';
   st.ctx = await analyze(file).catch(() => ({}));
   ask('');   // AI already has suggestions when the user lands here
 };
@@ -57,7 +57,7 @@ async function ask(prompt) {
   try {
     const r = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt, context: { ...st.ctx, description: $('st-desc').value } }) });
     const j = await r.json(); $('ai-reply').textContent = j.reply; renderAI(j.items || []);
-  } catch { $('ai-reply').textContent = 'تعذر الوصول لـ AI، عاود حاول.'; }
+  } catch { $('ai-reply').textContent = 'IA indisponible, réessayez.'; }
 }
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function renderAI(items) {
@@ -66,8 +66,8 @@ function renderAI(items) {
     const row = document.createElement('div'); row.className = 'ai-item';
     row.innerHTML = (it.track ? `<img src="${it.track.cover}" width="40" height="40" style="border-radius:8px">` : '') + `<div class="tx"><b>${esc(it.title)}</b>${esc(it.text)}</div>`;
     if (it.track) { const pb = playBtn(it.track); row.appendChild(pb); }
-    const u = document.createElement('button'); u.className = 'use'; u.textContent = 'استعمل هادا';
-    u.onclick = () => { applyItem(it); u.textContent = '✓ تم'; u.classList.add('done'); };
+    const u = document.createElement('button'); u.className = 'use'; u.textContent = 'Utiliser';
+    u.onclick = () => { applyItem(it); u.textContent = '✓ Utilisé'; u.classList.add('done'); };
     row.appendChild(u); box.appendChild(row);
   }
 }
@@ -85,11 +85,11 @@ $('ai-send').onclick = sendQ;
 $('ai-q').onkeydown = (e) => { if (e.key === 'Enter') sendQ(); };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 $('ai-mic').onclick = () => {
-  if (!SR) { $('ai-reply').textContent = 'المتصفح ما كيدعمش الصوت، كتب الطلب.'; return; }
-  const r = new SR(); r.lang = 'ar-MA'; r.interimResults = false;
+  if (!SR) { $('ai-reply').textContent = 'Dictée vocale non prise en charge, écrivez votre demande.'; return; }
+  const r = new SR(); r.lang = 'fr-FR'; r.interimResults = false;
   const mic = $('ai-mic'); mic.classList.add('rec');
   r.onresult = (e) => { const q = e.results[0][0].transcript; $('ai-q').value = q; sendQ(); };
-  r.onerror = () => { $('ai-reply').textContent = 'ما قدرتش نسمعك، عاود.'; };
+  r.onerror = () => { $('ai-reply').textContent = 'Je ne vous ai pas entendu, réessayez.'; };
   r.onend = () => mic.classList.remove('rec');
   r.start();
 };
@@ -114,7 +114,7 @@ async function loadPlaylist(q = '') {
     const row = document.createElement('div'); row.className = 'mu-item';
     row.innerHTML = `<img src="${t.cover}" alt=""><div class="tx">${esc(t.name)}<small>${esc(t.artist)} · ${esc(t.mood)}</small></div>`;
     row.appendChild(playBtn(t));
-    const u = document.createElement('button'); u.className = 'use'; u.textContent = 'استعمل هادي'; u.onclick = () => chooseMusic(t);
+    const u = document.createElement('button'); u.className = 'use'; u.textContent = 'Utiliser'; u.onclick = () => chooseMusic(t);
     row.appendChild(u); box.appendChild(row);
   }
 }
@@ -132,6 +132,8 @@ $('st-music-del').onclick = () => { st.music = null; renderMusic(); };
 $('st-pub').onclick = async () => {
   const file = st.file;
   if (!file || busy) return;
+  const title = $('st-title').value.trim();
+  if (title.length < 2 || CAMERA.test(title)) { setProgress('❌ Donnez un vrai titre à votre clip (pas un nom de fichier)', 0); $('st-title').focus(); return; }
   busy = true; result.innerHTML = ''; $('st-pub').disabled = true; player.pause();
   try {
     setProgress('Vérification du stockage…', 0);
@@ -147,7 +149,7 @@ $('st-pub').onclick = async () => {
     const poster = await uploadPoster(file, key);
     setProgress('Publication…', 100);
     const rec = await api('/publish', {
-      key, title: titleOf(file), description: $('st-desc').value, comment: $('st-comment').value,
+      key, title, description: $('st-desc').value, comment: $('st-comment').value,
       musicId: music ? music.id : null, enhancement: { ...st.fx }, poster,
     });
     setProgress('✅ Publié', 100);
@@ -155,8 +157,8 @@ $('st-pub').onclick = async () => {
     const a = document.createElement('a');
     a.className = 'up-dl'; a.textContent = 'Télécharger l\u2019original'; a.href = URL.createObjectURL(file); a.download = file.name;
     result.appendChild(a);
+    st.file = null; $('st-title').value = ''; $('st-desc').value = ''; $('st-comment').value = ''; $('st-2').hidden = true; $('st-1').hidden = false; $('up-title').textContent = 'Nouveau clip';
     showClip(rec);   // feed shows the new clip immediately
-    st.file = null; $('st-comment').value = ''; $('st-2').hidden = true; $('st-1').hidden = false; $('up-title').textContent = 'Nouveau clip';
   } catch (err) {
     console.error(err);
     setProgress('❌ ' + err.message + ' — appuyez sur Publier pour réessayer', 0);
@@ -275,6 +277,5 @@ function putPart(url, chunk, contentType, onBytes, cacheControl) {
 
 // The feed (index.html) is the single source of what is displayed: a published clip is handed to it, never drawn here.
 function showClip(c) {
-  window.__arena.add(c);
-  window.__arena.home();
+  window.__arena.published(c);
 }

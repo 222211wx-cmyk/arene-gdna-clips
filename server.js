@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   S3Client, CreateMultipartUploadCommand, UploadPartCommand, ListPartsCommand,
-  CompleteMultipartUploadCommand, AbortMultipartUploadCommand, HeadBucketCommand, PutBucketCorsCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand,
+  CompleteMultipartUploadCommand, AbortMultipartUploadCommand, HeadBucketCommand, PutBucketCorsCommand, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import fs from 'node:fs';
 import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
@@ -94,6 +94,7 @@ app.get('/api/music/:id/audio', wrap(async (req, res) => {
 app.post('/api/ask', wrap(async (req, res) => res.json(await askClip(String(req.body.prompt || '').slice(0, 500), req.body.clip || {}))));
 app.post('/api/ai', wrap(async (req, res) => res.json(await askAI(String(req.body.prompt || '').slice(0, 500), req.body.context || {}))));
 const api = express.Router();
+api.use(['/upload-url', '/poster-url', '/upload', '/upload-complete', '/publish'], (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Connexion requise', code: 'auth' })));
 api.use((req, res, next) => configured ? next()
   : res.status(503).json({ error: 'R2 non configuré: R2_ACCOUNT_ID (ou R2_ENDPOINT), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET' }));
 
@@ -174,28 +175,58 @@ const present = async (row, vs = {}) => ({
   title: row.title, description: row.description, comment: row.comment,
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
   author: { handle: row.handle, name: row.display_name },
-  likes: row.likes, comments: row.comments, saves: row.saves, views: row.views, createdAt: row.created_at,
+  tags: row.tags ? row.tags.split(' ') : [],
+  likes: row.likes, comments: row.comments, saves: row.saves, shares: row.shares, views: row.views, createdAt: row.created_at,
   viewer: { liked: !!vs.liked, saved: !!vs.saved, following: !!vs.following },
 });
-// Anonymous visitor identity: random cookie token -> a users row. Read-only requests never create one.
-const COOKIE = 'aid';
-const tokenOf = (req) => (/(?:^|;\s*)aid=([a-f0-9]{24})/.exec(req.headers.cookie || '') || [])[1] || null;
-const viewerOf = async (req) => { const t = tokenOf(req); return t ? db.viewerByToken(t) : null; };
-const writerOf = async (req, res) => {
-  let t = tokenOf(req);
-  if (!t) { t = crypto.randomBytes(12).toString('hex'); res.cookie(COOKIE, t, { maxAge: 365 * 864e5, httpOnly: true, sameSite: 'lax', secure: req.secure || req.headers['x-forwarded-proto'] === 'https', path: '/' }); }
-  return db.ensureViewer(t);
-};
+// ---- accounts: session cookie `sid` -> users row. Reads work anonymously; every write needs a login. ----
+const SID = 'sid';
+const sidOf = (req) => (/(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '') || [])[1] || null;
+const secure = (req) => req.secure || req.headers['x-forwarded-proto'] === 'https';
+const setSid = (req, res, token) => res.cookie(SID, token, { maxAge: 30 * 864e5, httpOnly: true, sameSite: 'lax', secure: secure(req), path: '/' });
+const presentUser = (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language } });
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+app.use('/api', wrapMw(async (req) => { req.user = dbConfigured ? await db.userBySession(sidOf(req)) : null; }));
+function wrapMw(fn) { return (req, res, next) => fn(req).then(() => next(), (e) => { console.error(e); res.status(500).json({ error: e.message }); }); }
+const needUser = (req, res, next) => req.user ? next() : res.status(401).json({ error: 'Connexion requise', code: 'auth' });
 const presentAll = async (req, rows) => {
-  const vs = await db.viewerState(await viewerOf(req), rows.map((r) => r.id));
+  const vs = await db.viewerState(req.user?.id, rows.map((r) => r.id));
   return Promise.all(rows.map((r) => present(r, vs[r.id])));
 };
 const needDb = (req, res, next) => dbConfigured ? next() : res.status(503).json({ error: 'Base de données non configurée (DATABASE_URL)' });
 
+// tiny in-memory throttle for login/signup (per IP, 20 tries / 10 min)
+const tries = new Map();
+const throttle = (req, res, next) => {
+  const k = req.ip, now = Date.now(), t = (tries.get(k) || []).filter((x) => now - x < 600000);
+  if (t.length >= 20) return res.status(429).json({ error: 'Trop de tentatives, réessayez dans quelques minutes' });
+  t.push(now); tries.set(k, t); next();
+};
 
-// ---- Social: like / save / comments / follow / citizen card / messages (all stored in Postgres) ----
+const auth = express.Router();
+auth.use(needDb);
+auth.post('/signup', throttle, wrap(async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase(), username = String(req.body?.username || '').trim().toLowerCase(), password = String(req.body?.password || '');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 200) return res.status(400).json({ error: 'Adresse e-mail invalide', field: 'email' });
+  if (!/^[a-z0-9_.]{3,24}$/.test(username)) return res.status(400).json({ error: 'Nom d’utilisateur : 3 à 24 caractères (lettres, chiffres, _ ou .)', field: 'username' });
+  if (password.length < 8 || password.length > 200) return res.status(400).json({ error: 'Mot de passe : 8 caractères minimum', field: 'password' });
+  const r = await db.signup({ email, username, password });
+  if (r.error) return res.status(409).json({ error: r.error === 'email' ? 'Cette adresse e-mail a déjà un compte' : 'Ce nom d’utilisateur est déjà pris', field: r.error });
+  setSid(req, res, await db.createSession(r.user.id));
+  res.json({ user: presentUser(r.user) });
+}));
+auth.post('/login', throttle, wrap(async (req, res) => {
+  const u = await db.login(String(req.body?.email || '').trim(), String(req.body?.password || ''));
+  if (!u) return res.status(401).json({ error: 'E-mail ou mot de passe incorrect' });
+  setSid(req, res, await db.createSession(u.id));
+  res.json({ user: presentUser(u) });
+}));
+auth.post('/logout', wrap(async (req, res) => { await db.endSession(sidOf(req)); res.clearCookie(SID, { path: '/' }); res.json({ ok: true }); }));
+app.use('/api/auth', auth);
+
+// ---- Social: like / save / share / comments / follow / citizen card / messages / profile (all stored in Postgres) ----
 const social = express.Router();
-social.use((req, res, next) => (/^\/(clips\/[^/]+\/(like|save|comments|follow)|citizen\/|messages|me$)/.test(req.path) ? needDb(req, res, next) : next()));
+social.use(needDb);
 const clipOr404 = async (req, res) => {
   if (!clipId(req.params.id)) { res.status(400).json({ error: 'requête invalide' }); return null; }
   const row = await clipById(req.params.id);
@@ -203,50 +234,91 @@ const clipOr404 = async (req, res) => {
   return row;
 };
 const flag = (req) => (typeof req.body?.on === 'boolean' ? req.body.on : true);
-social.put('/clips/:id/like', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setLike(await writerOf(req, res), c.id, flag(req))); }));
-social.put('/clips/:id/save', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setSave(await writerOf(req, res), c.id, flag(req))); }));
-social.get('/clips/:id/comments', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.set('Cache-Control', 'no-store').json({ comments: await db.listComments(c.id) }); }));
-social.post('/clips/:id/comments', wrap(async (req, res) => {
+social.put('/clips/:id/like', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setLike(req.user.id, c.id, flag(req))); }));
+social.put('/clips/:id/save', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setSave(req.user.id, c.id, flag(req))); }));
+social.post('/clips/:id/share', wrap(async (req, res) => {
+  const c = await clipOr404(req, res); if (!c) return;
+  const ch = ['link', 'native', 'whatsapp', 'message'].includes(req.body?.channel) ? req.body.channel : 'link';
+  res.json(await db.addShare(req.user?.id, c.id, ch));
+}));
+social.get('/clips/:id/comments', wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json({ comments: await db.listComments(c.id) }); }));
+social.post('/clips/:id/comments', needUser, wrap(async (req, res) => {
   const c = await clipOr404(req, res); if (!c) return;
   const body = String(req.body?.body || '').trim().slice(0, 500);
   if (!body) return res.status(400).json({ error: 'commentaire vide' });
-  res.json(await db.addComment(await writerOf(req, res), c.id, body));
+  res.json({ ...(await db.addComment(req.user.id, c.id, body)), name: req.user.display_name });
 }));
-social.put('/clips/:id/follow', wrap(async (req, res) => {
-  const c = await clipOr404(req, res); if (!c) return;
-  const r = await db.setFollow(await writerOf(req, res), c.author_id, flag(req));
+const followHandle = async (req, res, handle) => {
+  const u = await db.citizen(String(handle).slice(0, 80), null);
+  if (!u) return res.status(404).json({ error: 'créateur introuvable' });
+  const r = await db.setFollow(req.user.id, u.id, flag(req));
   if (r.error) return res.status(400).json({ error: 'vous ne pouvez pas vous suivre vous-même' });
   res.json(r);
+};
+social.put('/clips/:id/follow', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; const r = await db.setFollow(req.user.id, c.author_id, flag(req)); if (r.error) return res.status(400).json({ error: 'vous ne pouvez pas vous suivre vous-même' }); res.json(r); }));
+social.put('/users/:handle/follow', needUser, wrap(async (req, res) => followHandle(req, res, req.params.handle)));
+const profileOf = async (req, handle) => {
+  const u = await db.citizen(String(handle).slice(0, 80), req.user?.id);
+  if (!u) return null;
+  const me = req.user?.id === u.id, hidden = u.private_profile && !me;
+  return { handle: u.handle, name: u.display_name, citizenId: `#${u.year}-${u.seq}`, verified: u.clips > 0, clips: u.clips, followers: u.followers, following: u.following, me, following_by_me: u.followed, private: hidden, allowMessages: u.allow_messages, _id: u.id };
+};
+social.get('/citizen/:handle', wrap(async (req, res) => { const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' }); delete p._id; res.json(p); }));
+social.get('/users/:handle', wrap(async (req, res) => { const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' }); delete p._id; res.json(p); }));
+social.get('/users/:handle/clips', wrap(async (req, res) => {
+  const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' });
+  if (p.private) return res.json({ clips: [], next: null, private: true });
+  const { rows, next } = await dbFeed({ limit: 30, authorHandle: p.handle });
+  res.json({ clips: await presentAll(req, rows), next });
 }));
-social.get('/citizen/:handle', wrap(async (req, res) => {
-  const u = await db.citizen(String(req.params.handle).slice(0, 80), await viewerOf(req));
-  if (!u) return res.status(404).json({ error: 'créateur introuvable' });
-  res.set('Cache-Control', 'no-store').json({ handle: u.handle, name: u.display_name, citizenId: `#${u.year}-${u.seq}`, verified: u.clips > 0, clips: u.clips, followers: u.followers, following: u.following });
+social.get('/users/:handle/followers', wrap(async (req, res) => {
+  const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' });
+  res.json({ followers: p.private ? [] : await db.followers(p._id), private: p.private });
 }));
-social.post('/messages', wrap(async (req, res) => {
+social.post('/messages', needUser, wrap(async (req, res) => {
   const body = String(req.body?.body || '').trim().slice(0, 1000);
   if (!body) return res.status(400).json({ error: 'message vide' });
   const to = await db.citizen(String(req.body?.to || ''), null);
   if (!to) return res.status(404).json({ error: 'destinataire introuvable' });
-  const from = await writerOf(req, res);
-  if (from === to.id) return res.status(400).json({ error: 'destinataire invalide' });
-  res.json(await db.sendMessage(from, to.id, clipId(req.body?.clip) ? req.body.clip : null, body));
+  if (req.user.id === to.id) return res.status(400).json({ error: 'destinataire invalide' });
+  if (!to.allow_messages) return res.status(403).json({ error: 'Ce créateur n’accepte pas les messages' });
+  res.json(await db.sendMessage(req.user.id, to.id, clipId(req.body?.clip) ? req.body.clip : null, body));
 }));
-social.get('/messages', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ messages: v ? await db.inbox(v, String(req.query.with || '').slice(0, 80) || undefined) : [] }); }));
-social.get('/me', wrap(async (req, res) => { const v = await viewerOf(req); res.set('Cache-Control', 'no-store').json({ saved: v ? await presentAll(req, await db.savedClips(v)) : [] }); }));
+social.get('/messages', needUser, wrap(async (req, res) => {
+  const w = String(req.query.with || '').slice(0, 80);
+  if (!w) return res.json({ conversations: await db.conversations(req.user.id) });
+  const t = await db.thread(req.user.id, w); if (!t) return res.status(404).json({ error: 'créateur introuvable' });
+  res.json(t);
+}));
+social.get('/me', wrap(async (req, res) => res.json({ user: presentUser(req.user), unread: req.user ? await db.unreadCount(req.user.id) : 0 })));
+social.get('/me/saved', needUser, wrap(async (req, res) => res.json({ clips: await presentAll(req, await db.savedClips(req.user.id)) })));
+social.patch('/me', needUser, wrap(async (req, res) => {
+  const b = req.body || {}, s = {};
+  for (const k of ['notifications', 'private_profile', 'allow_messages']) if (typeof b[k] === 'boolean') s[k] = b[k];
+  if (typeof b.display_name === 'string') { const n = b.display_name.trim().slice(0, 40); if (n.length < 2) return res.status(400).json({ error: 'Nom trop court' }); s.display_name = n; }
+  res.json({ user: presentUser(await db.updateSettings(req.user.id, s)) });
+}));
+social.delete('/me', needUser, wrap(async (req, res) => {
+  const keys = await db.deleteAccount(req.user.id, String(req.body?.password || ''));
+  if (!keys) return res.status(403).json({ error: 'Mot de passe incorrect' });
+  res.clearCookie(SID, { path: '/' });
+  if (configured) for (const Key of keys) s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key })).catch(() => {});
+  res.json({ ok: true });
+}));
 app.use('/api', social);
 
 // One DB row per clip (id is the primary key, so a retry can never create a duplicate).
-api.post('/publish', needDb, wrap(async (req, res) => {
+api.post('/publish', needDb, needUser, wrap(async (req, res) => {
   const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false } = req.body;
   if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
+  if (String(title).trim().length < 2 || /\b(?:VID|IMG|MOV|MVI|PXL|DSC|WA)[-_ ]*\d/i.test(title)) return res.status(400).json({ error: 'Titre requis (pas un nom de fichier)' });
   const music = musicId ? musicById(musicId) : null;
   if (musicId && !music) return res.status(400).json({ error: 'musique inconnue' });
   const fx = { eclairage: Number(enhancement.eclairage) || 0, couleur: Number(enhancement.couleur) || 0, cartoon: !!enhancement.cartoon };
   let pk = null;
   if (poster) { try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: posterKey(key) })); pk = posterKey(key); } catch {} }
   const row = await upsertClip({
-    id: idOf(key), userId: getDefaultUserId(), key, posterKey: pk, title: String(title).slice(0, 120),
+    id: idOf(key), userId: req.user.id, key, posterKey: pk, title: String(title).trim().slice(0, 120),
     description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
     musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
   });
@@ -285,7 +357,7 @@ api.get('/clips/:id/download', wrap(async (req, res) => {
 
 // The feed: straight from the database, newest first, keyset-paginated (?limit=&before=).
 api.get('/clips', needDb, wrap(async (req, res) => {
-  const { rows, next } = await dbFeed({ limit: Number(req.query.limit) || 10, before: /^[\w:.+-]+_[\w.-]+$/.test(req.query.before || '') ? req.query.before : undefined, q: String(req.query.q || '').trim().slice(0, 80) || undefined });
+  const { rows, next } = await dbFeed({ limit: Number(req.query.limit) || 10, before: /^[\w:.+-]+_[\w.-]+$/.test(req.query.before || '') ? req.query.before : undefined, q: String(req.query.q || '').trim().slice(0, 80) || undefined, viewerId: req.user?.id });
   res.set('Cache-Control', 'no-store').json({ clips: await presentAll(req, rows), next, build: BUILD_ID });
 }));
 
