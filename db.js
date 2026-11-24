@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS clips.messages (
 );
 CREATE INDEX IF NOT EXISTS messages_to_idx ON clips.messages (to_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS messages_from_idx ON clips.messages (from_id, created_at DESC);
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS v720_key text;
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS v360_key text;
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS password_hash text;
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS notifications boolean NOT NULL DEFAULT true;
@@ -115,7 +117,7 @@ export async function migrate() {
 }
 export const getDefaultUserId = () => defaultUserId;
 
-const COLS = `c.id, c.key, c.poster_key, c.title, c.description, c.comment, c.music_id, c.music_name, c.music_artist,
+const COLS = `c.id, c.key, c.poster_key, c.v720_key, c.v360_key, c.title, c.description, c.comment, c.music_id, c.music_name, c.music_artist,
   c.enhancement, c.views, c.created_at, u.id AS author_id, u.handle, u.display_name,
   (SELECT count(*)::int FROM clips.likes l WHERE l.clip_id = c.id) AS likes,
   (SELECT count(*)::int FROM clips.comments m WHERE m.clip_id = c.id) AS comments,
@@ -157,13 +159,14 @@ export async function clipById(id) {
 }
 export async function upsertClip(c) {
   await pool.query(
-    `INSERT INTO clips.clips (id,user_id,key,poster_key,title,description,comment,music_id,music_name,music_artist,enhancement,created_at,tags)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::timestamptz, now()),$13)
+    `INSERT INTO clips.clips (id,user_id,key,poster_key,v720_key,v360_key,title,description,comment,music_id,music_name,music_artist,enhancement,created_at,tags)
+     VALUES ($1,$2,$3,$4,$14,$15,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::timestamptz, now()),$13)
      ON CONFLICT (id) DO UPDATE SET poster_key = COALESCE(EXCLUDED.poster_key, clips.clips.poster_key),
+       v720_key = COALESCE(EXCLUDED.v720_key, clips.clips.v720_key), v360_key = COALESCE(EXCLUDED.v360_key, clips.clips.v360_key),
        title = EXCLUDED.title, description = EXCLUDED.description, comment = EXCLUDED.comment,
        music_id = EXCLUDED.music_id, music_name = EXCLUDED.music_name, music_artist = EXCLUDED.music_artist,
        enhancement = EXCLUDED.enhancement, tags = EXCLUDED.tags`,
-    [c.id, c.userId, c.key, c.posterKey || null, c.title, c.description, c.comment, c.musicId, c.musicName, c.musicArtist, JSON.stringify(c.enhancement || {}), c.createdAt || null, tagsOf(c.title, c.description, c.comment)]);
+    [c.id, c.userId, c.key, c.posterKey || null, c.title, c.description, c.comment, c.musicId, c.musicName, c.musicArtist, JSON.stringify(c.enhancement || {}), c.createdAt || null, tagsOf(c.title, c.description, c.comment), c.v720Key || null, c.v360Key || null]);
   return clipById(c.id);
 }
 export async function knownKeys() {
@@ -220,7 +223,7 @@ export async function updateSettings(userId, s) {
 export async function deleteAccount(userId, password) {
   const { rows } = await pool.query('SELECT password_hash FROM clips.users WHERE id = $1', [userId]);
   if (!rows[0] || !checkPw(password, rows[0].password_hash)) return null;
-  const k = await pool.query('SELECT key, poster_key FROM clips.clips WHERE user_id = $1', [userId]);
+  const k = await pool.query('SELECT key, poster_key, v720_key, v360_key FROM clips.clips WHERE user_id = $1', [userId]);
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
@@ -228,7 +231,7 @@ export async function deleteAccount(userId, password) {
     await c.query('DELETE FROM clips.users WHERE id = $1', [userId]);
     await c.query('COMMIT');
   } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
-  return k.rows.flatMap((r) => [r.key, r.poster_key]).filter(Boolean);
+  return k.rows.flatMap((r) => [r.key, r.poster_key, r.v720_key, r.v360_key]).filter(Boolean);
 }
 // Per-clip state for one viewer: liked / saved / following the author.
 export async function viewerState(userId, ids) {

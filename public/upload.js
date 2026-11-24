@@ -147,7 +147,7 @@ $('st-pub').onclick = async () => {
     originals.set(key, file);
     setProgress('Miniature…', 100);
     const poster = await uploadPoster(file, key);
-    setProgress('Publication…', 100);
+    setProgress('Compression 720p + 360p…', 100);
     const rec = await api('/publish', {
       key, title, description: $('st-desc').value, comment: $('st-comment').value,
       musicId: music ? music.id : null, enhancement: { ...st.fx }, poster,
