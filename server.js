@@ -223,11 +223,12 @@ const throttle = (req, res, next) => {
 const auth = express.Router();
 auth.use(needDb);
 auth.post('/signup', throttle, wrap(async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase(), username = String(req.body?.username || '').trim().toLowerCase(), password = String(req.body?.password || '');
+  const email = String(req.body?.email || '').trim().toLowerCase(), username = String(req.body?.username || '').trim().toLowerCase().replace(/\s+/g, '_'), name = String(req.body?.name || '').trim().replace(/\s+/g, ' '), password = String(req.body?.password || '');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 200) return res.status(400).json({ error: 'Adresse e-mail invalide', field: 'email' });
-  if (!/^[a-z0-9_.]{3,24}$/.test(username)) return res.status(400).json({ error: 'Nom d’utilisateur : 3 à 24 caractères (lettres, chiffres, _ ou .)', field: 'username' });
+  if (!/^[a-z0-9_.]{3,24}$/.test(username)) return res.status(400).json({ error: 'Nom d’utilisateur : 3 à 24 caractères, avec des lettres minuscules, des chiffres, _ ou .', field: 'username' });
+  if (req.body?.name !== undefined && (name.length < 3 || name.length > 40)) return res.status(400).json({ error: 'Nom complet : 3 à 40 caractères', field: 'name' });
   if (password.length < 8 || password.length > 200) return res.status(400).json({ error: 'Mot de passe : 8 caractères minimum', field: 'password' });
-  const r = await db.signup({ email, username, password });
+  const r = await db.signup({ email, username, name: name || username, password });
   if (r.error) return res.status(409).json({ error: r.error === 'email' ? 'Cette adresse e-mail a déjà un compte' : 'Ce nom d’utilisateur est déjà pris', field: r.error });
   setSid(req, res, await db.createSession(r.user.id));
   res.json({ user: await presentUser(r.user) });

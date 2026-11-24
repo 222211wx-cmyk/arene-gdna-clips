@@ -622,15 +622,34 @@
     var signup = kind === 'signup', next = safeNext(new URLSearchParams(location.search).get('next'));
     var alt = '/' + (signup ? 'login' : 'signup') + (next ? '?next=' + encodeURIComponent(next) : '');
     setPage(pageHead(signup ? 'Créer un compte' : 'Connexion') + '<form id="au" class="flex flex-col gap-3" action="javascript:void(0)" novalidate>' +
-      (signup ? '<label for="au-u" class="text-xs font-bold text-neutral-300">Nom d’utilisateur</label><input id="au-u" name="username" type="text" inputmode="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" maxlength="24" placeholder="ex. mon_nom" class="' + inp + ' font-normal">' : '') +
+      (signup ? '<label for="au-n" class="text-xs font-bold text-neutral-300">Nom complet</label><input id="au-n" name="name" type="text" inputmode="text" autocomplete="name" autocapitalize="words" enterkeyhint="next" maxlength="40" placeholder="Ex: El Qaisy Abdelmalik" class="' + inp + ' font-normal"><div id="au-n-h" class="min-h-[16px] text-xs text-neutral-400"></div>' +
+        '<label for="au-u" class="text-xs font-bold text-neutral-300">Nom d’utilisateur @</label><input id="au-u" name="username" type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" maxlength="24" placeholder="ex: el_qaisy" class="' + inp + ' font-normal"><div id="au-u-h" class="min-h-[16px] text-xs text-neutral-400">Lettres minuscules, chiffres, _ et . (3 à 24)</div>' : '') +
       '<label for="au-e" class="text-xs font-bold text-neutral-300">E-mail</label><input id="au-e" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" placeholder="vous@exemple.com" class="' + inp + ' font-normal">' +
-      '<label for="au-p" class="text-xs font-bold text-neutral-300">Mot de passe</label><input id="au-p" name="password" type="password" inputmode="text" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="' + (signup ? '8 caractères minimum' : 'Votre mot de passe') + '" class="' + inp + ' font-normal">' +
-      '<div id="au-err" role="alert" class="min-h-[18px] text-sm text-red-400"></div><button id="au-go" class="' + btn + '">' + (signup ? 'Créer mon compte' : 'Se connecter') + '</button></form>' +
+      '<label for="au-p" class="text-xs font-bold text-neutral-300">Mot de passe</label><div class="relative"><input id="au-p" name="password" type="password" inputmode="text" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="' + (signup ? '8 caractères minimum' : 'Votre mot de passe') + '" class="' + inp + ' pr-12 font-normal"><button type="button" id="au-eye" aria-label="Afficher le mot de passe" class="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-neutral-400"><i data-lucide="eye" class="h-5 w-5"></i></button></div><div id="au-p-h" class="min-h-[16px] text-xs text-neutral-400"></div>' +
+      '<div id="au-err" role="alert" class="min-h-[18px] text-sm text-red-400"></div><div class="sticky bottom-0 -mx-4 -mb-4 bg-neutral-950 px-4 pb-4 pt-2"><button id="au-go" class="' + btn + ' w-full">' + (signup ? 'Créer mon compte' : 'Se connecter') + '</button></div></form>' +
       '<p class="mt-4 text-center text-sm text-neutral-400">' + (signup ? 'Déjà un compte ?' : 'Pas encore de compte ?') + ' <a id="au-alt" href="' + alt + '" class="font-bold text-amber-400">' + (signup ? 'Se connecter' : 'Créer un compte') + '</a></p>');
     $('au-alt').onclick = function (e) { e.preventDefault(); nav(alt, { replace: true }); };
+    var slug = function (t) { return t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[\s-]+/g, '_').replace(/[^a-z0-9_.]/g, '').slice(0, 24); };
+    var eye = $('au-eye'); eye.onclick = function () { var show = $('au-p').type === 'password'; $('au-p').type = show ? 'text' : 'password'; eye.innerHTML = '<i data-lucide="' + (show ? 'eye-off' : 'eye') + '" class="h-5 w-5"></i>'; eye.setAttribute('aria-label', show ? 'Masquer le mot de passe' : 'Afficher le mot de passe'); icons(); };
+    $('au-p').oninput = function () { $('au-p-h').textContent = this.value && this.value.length < 8 ? 'Encore ' + (8 - this.value.length) + ' caractère' + (8 - this.value.length > 1 ? 's' : '') + ' (8 minimum)' : ''; };
+    if (signup) {
+      var touched = false, uh = $('au-u-h'), hint = 'Lettres minuscules, chiffres, _ et . (3 à 24)';
+      $('au-n').oninput = function () { if (!touched) $('au-u').value = slug(this.value); $('au-n-h').textContent = this.value.trim() && this.value.trim().length < 3 ? '3 caractères minimum' : ''; uh.textContent = hint; };
+      $('au-u').oninput = function () {
+        var v = this.value, had = /\s/.test(v); touched = true;
+        v = v.toLowerCase().replace(/\s+/g, '_'); var c = v.replace(/[^a-z0-9_.]/g, ''); this.value = c;
+        uh.className = 'min-h-[16px] text-xs ' + (had || c !== v ? 'text-amber-400' : 'text-neutral-400');
+        uh.textContent = had ? 'Le @ ne peut pas contenir d’espace, on a mis _ à la place' : c !== v ? 'Seuls a-z, 0-9, _ et . sont permis, on a retiré le reste' : c && c.length < 3 ? '3 caractères minimum' : hint;
+      };
+    }
     $('au').onsubmit = function (e) {
-      e.preventDefault(); $('au-err').textContent = ''; $('au-go').disabled = true;
-      var body = { email: $('au-e').value, password: $('au-p').value }; if (signup) body.username = $('au-u').value;
+      e.preventDefault(); $('au-err').textContent = '';
+      var body = { email: $('au-e').value.trim(), password: $('au-p').value };
+      if (signup) { body.name = $('au-n').value.trim().replace(/\s+/g, ' '); body.username = $('au-u').value;
+        if (body.name.length < 3) { $('au-err').textContent = 'Écrivez votre nom complet (3 caractères minimum)'; $('au-n').focus(); return; }
+        if (body.username.length < 3) { $('au-err').textContent = 'Le nom d’utilisateur doit faire 3 caractères minimum'; $('au-u').focus(); return; } }
+      if (body.password.length < 8) { $('au-err').textContent = 'Le mot de passe doit faire 8 caractères minimum'; return; }
+      $('au-go').disabled = true;
       api('POST', '/api/auth/' + kind, body).then(function (r) { me = r.user; return Promise.all([refreshMe(), reloadFeed()]); }).then(function () { nav(next || '/profile', { replace: true }); })
         .catch(function (err) { $('au-err').textContent = err.message; $('au-go').disabled = false; });
     };
