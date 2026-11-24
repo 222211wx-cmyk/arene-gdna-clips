@@ -32,6 +32,8 @@
   @keyframes slu{from{transform:translateY(100%)}to{transform:none}}
   @keyframes sld{from{transform:translateY(-100%)}to{transform:none}}
   .up-sheet,.sh-sheet{z-index:75}
+  #hdr.bare{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;padding-bottom:0}
+  #hdr.bare #search-form{display:none}
 </style>
 </head>
 <body>
@@ -39,13 +41,13 @@
 
   <!-- Media: real clip from R2 (poster first, then the video) -->
   <img id="poster" alt="" class="absolute inset-0 h-full w-full object-cover hidden">
-  <video id="vid" class="absolute inset-0 h-full w-full object-cover" autoplay loop muted playsinline webkit-playsinline preload="auto"></video>
-  <div class="pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-black/70 to-transparent"></div>
+  <video id="vid" class="absolute inset-0 h-full w-full object-cover" autoplay loop muted playsinline webkit-playsinline preload="metadata"></video>
+  <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/60 to-transparent"></div>
   <div class="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
   <div id="empty" class="absolute inset-0 hidden items-center justify-center px-8 text-center text-white/80">Aucun clip pour le moment. Appuyez sur Importer pour publier le premier.</div>
 
   <!-- Header: Home (+ Back on every page but the feed) | logo -> Feed | Importer, then the one search bar -->
-  <header class="glass absolute inset-x-0 top-0 z-[65] px-3 pb-2 pt-[calc(env(safe-area-inset-top)+8px)]">
+  <header id="hdr" class="glass absolute inset-x-0 top-0 z-[65] px-3 pb-2 pt-[calc(env(safe-area-inset-top)+8px)]">
     <div class="grid h-12 grid-cols-[1fr_auto_1fr] items-center">
       <div class="flex items-center gap-1 justify-self-start">
         <button id="b-back" hidden aria-label="Retour" class="flex h-11 w-11 items-center justify-center rounded-full bg-white/10"><i data-lucide="arrow-left" class="h-6 w-6"></i></button>
@@ -61,20 +63,20 @@
     </form>
   </header>
 
-  <button id="v-x" hidden aria-label="Fermer la vidéo" class="absolute left-3 top-[calc(env(safe-area-inset-top)+124px)] z-[35] flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-lg ring-1 ring-white/30">✕</button>
+  <button id="v-x" hidden aria-label="Fermer la vidéo" class="absolute left-3 top-[calc(env(safe-area-inset-top)+68px)] z-[35] flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-lg ring-1 ring-white/30">✕</button>
+  <button id="r-snd" aria-label="Son" class="rail-btn absolute right-3 top-[calc(env(safe-area-inset-top)+68px)] z-[30] flex h-9 w-9 items-center justify-center rounded-full bg-black/45"><i data-lucide="volume-x" class="h-5 w-5"></i></button>
   <button id="replay" hidden aria-label="Revoir" class="absolute left-1/2 top-[42%] z-[30] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-black/70 px-6 py-3 text-base font-extrabold ring-1 ring-white/40"><i data-lucide="rotate-ccw" class="h-5 w-5"></i>Revoir</button>
 
   <!-- Right rail: Like, Comment, Share, Save (all stored in the database) -->
-  <aside class="absolute right-3 z-20 flex flex-col items-center gap-3 bottom-[calc(env(safe-area-inset-bottom)+128px)]">
-    <button id="r-snd" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="Son"><i data-lucide="volume-x" class="h-7 w-7"></i><span class="text-[11px] font-bold txs">Son</span></button>
-    <button id="r-like" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="J'aime"><i data-lucide="heart" class="h-8 w-8"></i><span class="text-xs font-bold txs" data-n>0</span></button>
-    <button id="r-comment" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="Commentaires"><i data-lucide="message-circle" class="h-8 w-8"></i><span class="text-xs font-bold txs" data-n>0</span></button>
-    <button id="r-share" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="Partager"><i data-lucide="share-2" class="h-8 w-8"></i><span class="text-xs font-bold txs" data-n>0</span></button>
-    <button id="r-save" class="rail-btn flex w-14 flex-col items-center gap-1" aria-label="Enregistrer"><i data-lucide="bookmark" class="h-8 w-8"></i><span class="text-xs font-bold txs" data-n>0</span></button>
+  <aside class="absolute right-3 z-20 flex flex-col items-center gap-4 bottom-[calc(env(safe-area-inset-bottom)+124px)]">
+    <button id="r-like" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="J'aime"><i data-lucide="heart" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
+    <button id="r-comment" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Commentaires"><i data-lucide="message-circle" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
+    <button id="r-share" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Partager"><i data-lucide="share-2" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
+    <button id="r-save" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Enregistrer"><i data-lucide="bookmark" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
   </aside>
 
   <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
-  <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+124px)] pr-20">
+  <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+116px)] pr-16">
     <div class="flex items-center gap-2">
       <button id="author-btn" aria-label="Voir le profil" class="flex min-w-0 items-center gap-2 text-left">
         <span id="avatar" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-sm font-extrabold text-black">AC</span>
@@ -82,15 +84,13 @@
       </button>
       <button id="follow" class="ml-1 shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
     </div>
-    <p id="c-title" class="mt-2 line-clamp-1 text-[15px] font-extrabold leading-snug txs"></p>
-    <p id="caption" class="mt-0.5 line-clamp-2 text-sm leading-snug txs"></p>
-    <p id="music" class="mt-1.5 flex items-center gap-1.5 truncate text-xs opacity-90 txs"><i data-lucide="music" class="h-3.5 w-3.5 shrink-0"></i><span class="truncate"></span></p>
+    <p class="mt-2 line-clamp-2 text-sm leading-snug txs"><b id="c-title" class="font-extrabold"></b> <span id="caption"></span></p>
   </section>
 
-  <div class="absolute inset-x-3 z-20 flex gap-2 bottom-[calc(env(safe-area-inset-bottom)+72px)]">
-    <button id="t-card" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[#F3E6B8] text-[13px] font-bold text-neutral-900"><i data-lucide="id-card" class="h-4 w-4"></i>Citizen Card</button>
-    <button id="t-msg" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[#F3E6B8] text-[13px] font-bold text-neutral-900"><i data-lucide="send" class="h-4 w-4"></i>Message</button>
-    <button id="t-ai" class="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-neutral-900 text-[13px] font-bold text-white ring-1 ring-white/25"><i data-lucide="sparkles" class="h-4 w-4 text-gold"></i>Ask AI</button>
+  <div class="absolute left-3 z-20 flex gap-2 bottom-[calc(env(safe-area-inset-bottom)+72px)]">
+    <button id="t-card" aria-label="Citizen Card" title="Citizen Card" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="id-card" class="h-[18px] w-[18px]"></i></button>
+    <button id="t-msg" aria-label="Message" title="Message" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="send" class="h-[18px] w-[18px]"></i></button>
+    <button id="t-ai" aria-label="Ask AI" title="Ask AI" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="sparkles" class="h-[18px] w-[18px] text-gold"></i></button>
   </div>
 
   <nav class="absolute inset-x-0 bottom-0 z-40 flex h-[calc(64px+env(safe-area-inset-bottom))] items-start border-t border-white/10 bg-black/70 pb-[env(safe-area-inset-bottom)] backdrop-blur">

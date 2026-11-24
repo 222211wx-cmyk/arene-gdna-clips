@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
 import { ask as askAI, askClip } from './ai.js';
+import { transcode } from './transcode.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as db from './db.js';
 import { dbConfigured, migrate, getDefaultUserId, feed as dbFeed, clipById, upsertClip, knownKeys } from './db.js';
@@ -168,10 +169,13 @@ api.post(['/upload-complete', '/upload/complete'], wrap(async (req, res) => {
 }));
 
 // Clip URLs: CDN when R2_PUBLIC_URL is set, otherwise short-lived signed R2 URLs.
-const mediaUrl = async (key) => CDN ? `${CDN}/${key}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
+const mediaUrl = async (key, ver) => CDN ? `${CDN}/${key}${ver ? `?v=${ver}` : ''}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
+const ver = (row) => Math.floor(new Date(row.created_at).getTime() / 1000);
 const present = async (row, vs = {}) => ({
-  id: row.id, key: row.key, url: await mediaUrl(row.key),
-  poster: row.poster_key ? await mediaUrl(row.poster_key) : null,
+  id: row.id, key: row.key,
+  // the feed never serves the original: 720p, and a 360p fallback (legacy clips without renditions keep the original until backfilled)
+  url: await mediaUrl(row.v720_key || row.key, ver(row)), url360: row.v360_key ? await mediaUrl(row.v360_key, ver(row)) : null,
+  poster: row.poster_key ? await mediaUrl(row.poster_key, ver(row)) : null,
   title: row.title, description: row.description, comment: row.comment,
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
   author: { handle: row.handle, name: row.display_name },
@@ -317,8 +321,11 @@ api.post('/publish', needDb, needUser, wrap(async (req, res) => {
   const fx = { eclairage: Number(enhancement.eclairage) || 0, couleur: Number(enhancement.couleur) || 0, cartoon: !!enhancement.cartoon };
   let pk = null;
   if (poster) { try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: posterKey(key) })); pk = posterKey(key); } catch {} }
+  let rend;
+  try { rend = await transcode({ s3, bucket: R2_BUCKET, key, id: idOf(key) }); }
+  catch (e) { console.error('[transcode]', e.message); return res.status(500).json({ error: 'Compression de la vidéo impossible : ' + e.message.slice(0, 160) }); }
   const row = await upsertClip({
-    id: idOf(key), userId: req.user.id, key, posterKey: pk, title: String(title).trim().slice(0, 120),
+    id: idOf(key), userId: req.user.id, key, posterKey: pk, v720Key: rend.v720, v360Key: rend.v360, title: String(title).trim().slice(0, 120),
     description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
     musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
   });
@@ -380,7 +387,19 @@ async function backfill() {
   } while (token);
   if (n) console.log(`[db] imported ${n} existing clip(s) from R2`);
 }
-migrate().then(() => { console.log(dbConfigured ? '[db] ready' : '[db] DATABASE_URL not set'); return backfill(); })
+// Clips published before compression existed get their 720p/360p renditions in the background, one at a time.
+async function backfillRenditions() {
+  if (!configured || !dbConfigured) return;
+  const { rows } = await db.pool.query('SELECT id, key FROM clips.clips WHERE v720_key IS NULL ORDER BY created_at DESC');
+  for (const r of rows) {
+    try {
+      const o = await transcode({ s3, bucket: R2_BUCKET, key: r.key, id: r.id });
+      await db.pool.query('UPDATE clips.clips SET v720_key = $2, v360_key = $3 WHERE id = $1', [r.id, o.v720, o.v360]);
+      console.log(`[transcode] backfilled ${r.id}`, o.sizes);
+    } catch (e) { console.error(`[transcode] backfill ${r.id} failed:`, e.message); }
+  }
+}
+migrate().then(() => { console.log(dbConfigured ? '[db] ready' : '[db] DATABASE_URL not set'); return backfill(); }).then(backfillRenditions)
   .catch((e) => console.error('[db] startup failed:', e.message));
 
 app.get('/api/config', async (req, res) => {
