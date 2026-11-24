@@ -26,23 +26,33 @@ const enc = (maxrate, buf, crf, ab) => ['-c:v', 'libx264', '-profile:v', 'main',
   '-pix_fmt', 'yuv420p', '-g', '48', '-c:a', 'aac', '-b:a', ab, '-ac', '2', '-movflags', '+faststart'];
 
 let chain = Promise.resolve();
+// Filters are baked into the compressed files. ids match the buttons in the upload studio.
+export const FILTERS = {
+  vif: 'eq=saturation=1.4:contrast=1.1',
+  chaud: 'colorbalance=rs=0.12:gs=0.02:bs=-0.12,eq=saturation=1.1',
+  froid: 'colorbalance=rs=-0.1:bs=0.14,eq=saturation=1.05',
+  nb: 'hue=s=0,eq=contrast=1.1',
+  vintage: 'curves=preset=vintage',
+};
 export const keysFor = (id) => ({ v720: `v/${id}-720.mp4`, v360: `v/${id}-360.mp4` });
 
-export function transcode({ s3, bucket, key, id }) {
-  const job = chain.then(() => work({ s3, bucket, key, id }));
+export function transcode({ s3, bucket, key, id, trim = null, filter = '' }) {
+  const job = chain.then(() => work({ s3, bucket, key, id, trim, filter }));
   chain = job.catch(() => {});
   return job;
 }
 
-async function work({ s3, bucket, key, id }) {
+async function work({ s3, bucket, key, id, trim, filter }) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tc-'));
   try {
     const src = path.join(dir, 'src');
     const g = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     await pipeline(g.Body, createWriteStream(src));
     const o7 = path.join(dir, '720.mp4'), o3 = path.join(dir, '360.mp4');
-    await run('ffmpeg', ['-hide_banner', '-nostdin', '-y', '-i', src,
-      '-filter_complex', `[0:v:0]split=2[a][b];[a]${scale(720)}[v7];[b]${scale(360)}[v3]`,
+    const cut = trim ? ['-ss', String(trim.start), '-t', String(+(trim.end - trim.start).toFixed(2))] : [];
+    const fx = FILTERS[filter] ? FILTERS[filter] + ',' : '';
+    await run('ffmpeg', ['-hide_banner', '-nostdin', '-y', ...cut, '-i', src,
+      '-filter_complex', `[0:v:0]${fx}split=2[a][b];[a]${scale(720)}[v7];[b]${scale(360)}[v3]`,
       '-map', '[v7]', '-map', '0:a:0?', ...enc('1100k', '2200k', 25, '128k'), o7,
       '-map', '[v3]', '-map', '0:a:0?', ...enc('450k', '900k', 28, '64k'), o3]);
     const k = keysFor(id), sizes = {};

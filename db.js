@@ -75,6 +75,7 @@ CREATE INDEX IF NOT EXISTS messages_to_idx ON clips.messages (to_id, created_at 
 CREATE INDEX IF NOT EXISTS messages_from_idx ON clips.messages (from_id, created_at DESC);
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS v720_key text;
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS v360_key text;
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS guest_token text UNIQUE;
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS password_hash text;
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS notifications boolean NOT NULL DEFAULT true;
@@ -194,6 +195,17 @@ export async function signup({ email, username, password }) {
     if (e.code === '23505') return { error: /email/.test(e.constraint || e.detail || '') ? 'email' : 'username' };
     throw e;
   }
+}
+// Guest mode: a visitor without an account gets a hidden users row tied to a `gid` cookie, so like/save/comment/message persist.
+export async function guestByToken(token) {
+  if (!pool || !/^[a-f0-9]{32}$/.test(token || '')) return null;
+  const { rows } = await pool.query(`SELECT ${USER_COLS} FROM clips.users WHERE guest_token = $1`, [sha(token)]);
+  return rows[0] || null;
+}
+export async function createGuest() {
+  const token = crypto.randomBytes(16).toString('hex'), handle = 'invite-' + crypto.randomBytes(4).toString('hex');
+  const { rows } = await pool.query(`INSERT INTO clips.users (handle, display_name, guest_token) VALUES ($1,'Invité',$2) RETURNING ${USER_COLS}`, [handle, sha(token)]);
+  return { user: rows[0], token };
 }
 export async function login(email, password) {
   const { rows } = await pool.query(`SELECT ${USER_COLS}, password_hash FROM clips.users WHERE lower(email) = lower($1)`, [email]);
