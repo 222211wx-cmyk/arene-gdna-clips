@@ -224,11 +224,11 @@ const checkPw = (pw, stored) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 const USER_COLS = 'id, handle, display_name, bio, city, link, avatar_key, cover_key, email, notifications, private_profile, allow_messages, language, created_at';
-export async function signup({ email, username, password }) {
+export async function signup({ email, username, name, password }) {
   try {
     const { rows } = await pool.query(
-      `INSERT INTO clips.users (handle, display_name, email, password_hash) VALUES ($1,$1,$2,$3) RETURNING ${USER_COLS}`,
-      [username, email, hashPw(password)]);
+      `INSERT INTO clips.users (handle, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING ${USER_COLS}`,
+      [username, name || username, email, hashPw(password)]);
     return { user: rows[0] };
   } catch (e) {
     if (e.code === '23505') return { error: /email/.test(e.constraint || e.detail || '') ? 'email' : 'username' };
