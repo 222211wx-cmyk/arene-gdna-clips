@@ -164,7 +164,7 @@ $('st-pub').onclick = async () => {
     setProgress('Compression 720p + 360p…', 100);
     const rec = await api('/publish', {
       key, title, description: $('st-desc').value, comment: $('st-comment').value,
-      musicId: music ? music.id : null, enhancement: { ...st.fx }, poster, filter: st.filter,
+      musicId: music ? music.id : null, enhancement: { ...st.fx }, poster, filter: st.filter, privacy: $('st-priv').value,
       trim: st.dur && (st.t0 > 0.05 || st.t1 < st.dur - 0.05) ? { start: st.t0, end: st.t1 } : null,
     });
     setProgress('✅ Publié', 100);

@@ -85,7 +85,7 @@
 
   /* ================= session ================= */
   function refreshMe() {
-    return api('GET', '/api/me').then(function (r) { me = r.user; unread = r.unread || 0; badge(); }).catch(function () { me = null; });
+    return api('GET', '/api/me').then(function (r) { me = r.user; unread = r.unread || 0; badge(); paintEq(); }).catch(function () { me = null; });
   }
   function badge() { var b = $('msg-badge'), n = me && me.settings.notifications ? unread : 0; b.hidden = !n; b.textContent = n > 99 ? '99+' : n; }
   setInterval(function () { if (me && !document.hidden) refreshMe(); }, 30000);
@@ -196,15 +196,16 @@
     if (!c) { empty.classList.remove('hidden'); empty.classList.add('flex'); return; }
     empty.classList.add('hidden'); empty.classList.remove('flex');
     var name = (c.author && c.author.name) || 'Arena Clips', mine = me && c.author && me.handle === c.author.handle;
-    $('author').textContent = name; $('avatar').textContent = initials(name);
+    $('author').textContent = name; var av = c.author && c.author.avatar; $('avatar').innerHTML = av ? '<img src="' + esc(av) + '" alt="" class="h-full w-full rounded-full object-cover">' : esc(initials(name));
     $('c-title').textContent = titleOf(c); $('caption').textContent = capOf(c);
     $('handle').textContent = '@' + ((c.author && c.author.handle) || '');
     var vw = c.viewer || {};
     $('r-like').classList.toggle('on', !!vw.liked); $('r-like').querySelector('[data-n]').textContent = c.likes || 0;
     $('r-save').classList.toggle('saved', !!vw.saved); $('r-save').querySelector('[data-n]').textContent = c.saves || 0;
+    $('l-fav').classList.toggle('fav', !!vw.favorited); $('l-fav').setAttribute('aria-pressed', String(!!vw.favorited));
     $('r-comment').querySelector('[data-n]').textContent = c.comments || 0;
     $('r-share').querySelector('[data-n]').textContent = c.shares || 0;
-    var f = $('follow'); f.hidden = !!mine; f.textContent = vw.following ? 'Abonné ✓' : 'Suivre'; f.classList.toggle('bg-white', !!vw.following); f.classList.toggle('text-black', !!vw.following);
+    var f = $('follow'); f.hidden = !!mine; f.textContent = vw.following ? 'Abonné ✓' : vw.requested ? 'Demandé' : 'Suivre'; f.classList.toggle('bg-white', !!vw.following); f.classList.toggle('text-black', !!vw.following);
     $('t-msg').disabled = !!mine; $('t-msg').classList.toggle('opacity-40', !!mine);
   }
   function jumpTo(n, dir) { idx = n; if (L === feedClips) feedI = n; show(dir); }
@@ -245,10 +246,13 @@
   var vv = window.visualViewport;
   function fit() { if (!vv) return; $('phone').style.setProperty('--vh', vv.height + 'px'); $('hdr').style.transform = 'translateY(' + vv.offsetTop + 'px)'; }
   if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); fit(); }
+  // never block focus or touch on inputs: the browser opens the keyboard itself. After it opens, bring the field to the middle and keep the bar visible.
   document.addEventListener('focusin', function (e) {
-    if (!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
-    setTimeout(function () { try { e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { /* ignore */ } }, 300);
+    var t = e.target; if (!/INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
+    var again = function () { if (document.activeElement !== t) return; try { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { /* ignore */ } $('phone').scrollTop = 0; fit(); };
+    setTimeout(again, 120); setTimeout(again, 450);
   });
+  if (vv) vv.addEventListener('resize', function () { var t = document.activeElement; if (t && /INPUT|TEXTAREA/.test(t.tagName)) { try { t.scrollIntoView({ block: 'center' }); } catch (x) { /* ignore */ } $('phone').scrollTop = 0; } });
 
   /* gestures: feed = swipe up/down for next/previous; fullscreen viewer = swipe down closes */
   var y0 = null, x0 = 0, ph = $('phone');
@@ -271,13 +275,34 @@
   }
   $('r-like').onclick = function () { toggle('like'); };
   $('r-save').onclick = function () { toggle('save'); };
-  function setFollowEverywhere(handle, on) { feedClips.concat(vlist || []).forEach(function (x) { if (x.author.handle === handle) (x.viewer || (x.viewer = {})).following = on; }); }
+  function setFollowEverywhere(handle, on, status) { feedClips.concat(vlist || []).forEach(function (x) { if (x.author.handle === handle) { var w = x.viewer || (x.viewer = {}); w.following = on && status !== 'pending'; w.requested = on && status === 'pending'; } }); }
   $('follow').onclick = guard(function () {
-    var c = cur(); if (!c) return; var on = !(c.viewer && c.viewer.following), h = c.author.handle;
+    var c = cur(); if (!c) return; var w = c.viewer || {}, on = !(w.following || w.requested), h = c.author.handle;
     setFollowEverywhere(h, on); paint();
-    api('PUT', '/api/clips/' + encodeURIComponent(c.id) + '/follow', { on: on }).catch(function (e) { setFollowEverywhere(h, !on); paint(); fail(e); });
+    api('PUT', '/api/clips/' + encodeURIComponent(c.id) + '/follow', { on: on }).then(function (r) { setFollowEverywhere(h, on, r.status); if (r.status === 'pending') toast('Demande de suivi envoyée'); paint(); }).catch(function (e) { setFollowEverywhere(h, !on); paint(); fail(e); });
   });
   $('author-btn').onclick = function () { var c = cur(); if (c) nav('/u/' + encodeURIComponent(c.author.handle)); };
+
+  /* ================= left rail: EQ avatar, Settings, Title/Caption, Favorite ================= */
+  function paintEq() {
+    var b = $('l-eq-t'); if (!b) return;
+    if (!me) { b.innerHTML = '<i data-lucide="user-round" class="h-5 w-5"></i>'; icons(); return; }
+    b.innerHTML = me.avatar ? '<img src="' + esc(me.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(me.name));
+  }
+  $('l-eq').onclick = function () { nav('/profile'); };
+  $('l-set').onclick = function () { nav('/settings'); };
+  $('l-cap').onclick = function () {
+    var c = cur(); if (!c) return;
+    var t = titleOf(c), d = capOf(c), cm = cleanTitle(c.comment);
+    openModal(head('Titre et légende') + '<div class="text-sm">' + (t ? '<div class="mb-2 text-lg font-extrabold">' + esc(t) + '</div>' : '') + (d ? '<p class="mb-2 whitespace-pre-wrap break-words text-neutral-200">' + esc(d) + '</p>' : '') + (cm ? '<p class="mb-2 whitespace-pre-wrap break-words text-neutral-400">' + esc(cm) + '</p>' : '') +
+      (!t && !d && !cm ? '<p class="text-neutral-400">Ce clip n’a ni titre ni légende.</p>' : '') + (c.tags && c.tags.length ? '<div class="mt-2 flex flex-wrap gap-2">' + c.tags.map(function (g) { return '<span class="rounded-full bg-neutral-800 px-3 py-1 text-xs text-amber-400">#' + esc(g) + '</span>'; }).join('') + '</div>' : '') +
+      (c.music ? '<div class="mt-3 text-xs text-neutral-400">♫ ' + esc(c.music.name) + (c.music.artist ? ' · ' + esc(c.music.artist) : '') + '</div>' : '') + '</div>');
+  };
+  $('l-fav').onclick = guard(function () {
+    var c = cur(); if (!c) return; var vw = c.viewer || (c.viewer = {}), was = !!vw.favorited;
+    vw.favorited = !was; paint(); toast(was ? 'Retiré des favoris' : 'Ajouté aux favoris');
+    api('PUT', '/api/clips/' + encodeURIComponent(c.id) + '/favorite', { on: !was }).catch(function (e) { vw.favorited = was; if (cur() === c) paint(); fail(e); });
+  });
 
   /* share sheet: copy / native share / WhatsApp, each recorded in the database */
   $('r-share').onclick = function () {
@@ -366,7 +391,7 @@
 
   /* ================= pages ================= */
   var TAB = { '/': 'home', '/search': 'search', '/clips': 'clips', '/messages': 'messages' };
-  function tabOf(p) { if (TAB[p]) return TAB[p]; if (/^\/messages\//.test(p)) return 'messages'; if (/^\/(profile|settings|login|signup|u\/)/.test(p)) return 'profile'; return 'home'; }
+  function tabOf(p) { if (TAB[p]) return TAB[p]; if (/^\/messages\//.test(p)) return 'messages'; if (/^\/(profile|profil|settings|login|signup|u\/)/.test(p)) return 'profile'; return 'home'; }
   var pageHead = function (t, extra) { return '<div class="mb-3 flex items-center justify-between"><h2 class="text-lg font-extrabold">' + t + '</h2>' + (extra || '') + '</div>'; };
   var msg = function (t) { return '<div class="text-sm text-neutral-400">' + t + '</div>'; };
   function thumb(c, cls) { return c.poster ? '<img src="' + esc(c.poster) + '" loading="lazy" alt="" class="' + cls + '">' : '<video src="' + esc(c.url360 || c.url) + '#t=0.1" preload="metadata" muted playsinline class="' + cls + '"></video>'; }
@@ -437,43 +462,156 @@
     }).catch(function (e) { setPage(pageHead('Conversation') + msg(esc(e.message))); });
   }
 
-  /* ---- profile (me / others) ---- */
+  /* ---- profile (me / others): header, edit, gallery [Photos | Vidéos | Clips] ---- */
   function statBox(n, l, id) { return '<button ' + (id ? 'data-tabgo="' + id + '"' : '') + ' class="rounded-xl bg-neutral-900 py-2 text-center"><div class="text-xl font-extrabold">' + n + '</div><div class="text-xs text-neutral-400">' + l + '</div></button>'; }
+  var EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' };
+  // file -> R2 (presigned PUT) -> returns the object key
+  function putFile(slot, file, onProgress) {
+    var ext = EXT[file.type] || ((/\.([a-z0-9]+)$/i.exec(file.name) || [])[1] || '').toLowerCase().replace('jpeg', 'jpg');
+    return api('POST', '/api/me/upload-url', { slot: slot, ext: ext, size: file.size }).then(function (u) {
+      return new Promise(function (ok, ko) {
+        var x = new XMLHttpRequest(); x.open('PUT', u.url);
+        x.setRequestHeader('content-type', u.contentType); if (u.cacheControl) x.setRequestHeader('cache-control', u.cacheControl);
+        if (onProgress) x.upload.onprogress = function (e) { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        x.onload = function () { x.status < 300 ? ok(u.key) : ko(new Error('Envoi vers R2 refusé (' + x.status + ')')); };
+        x.onerror = function () { ko(new Error('Envoi impossible : vérifiez votre connexion')); };
+        x.send(file);
+      });
+    });
+  }
+  var PRIV = { public: 'Public', followers: 'Abonnés uniquement', private: 'Privé' };
+  var lockIcon = function (p) { return p === 'private' ? '<span class="absolute left-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70" title="Privé"><i data-lucide="lock" class="h-3.5 w-3.5"></i></span>' : p === 'followers' ? '<span class="absolute left-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70" title="Abonnés uniquement"><i data-lucide="users" class="h-3.5 w-3.5"></i></span>' : ''; };
+  var dots = function (kind, id) { return '<span data-dots="' + id + '" data-kind="' + kind + '" role="button" aria-label="Options" class="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full bg-black/70"><i data-lucide="ellipsis-vertical" class="h-4 w-4"></i></span>'; };
+  // 3-dot menu: Public / Abonnés uniquement / Privé (saved in the database)
+  function privacyMenu(kind, id, cur, done) {
+    openModal(head('Visibilité') + '<div class="flex flex-col gap-2">' + ['public', 'followers', 'private'].map(function (k) { return '<button data-pv="' + k + '" class="flex w-full items-center justify-between rounded-xl p-3 text-left text-sm ' + (k === cur ? 'bg-amber-400 text-black' : 'bg-neutral-800') + '"><b>' + (k === 'public' ? 'Rendre public' : k === 'private' ? 'Rendre privé' : 'Abonnés uniquement') + '</b><span>' + (k === cur ? '✓' : '') + '</span></button>'; }).join('') + '</div>');
+    modal.querySelectorAll('[data-pv]').forEach(function (b) { b.onclick = function () {
+      api('PATCH', (kind === 'clip' ? '/api/clips/' : '/api/me/media/') + encodeURIComponent(id) + (kind === 'clip' ? '/privacy' : ''), { privacy: b.dataset.pv }).then(function (r) { toast('Visibilité : ' + PRIV[r.privacy]); closeOverlay(); setTimeout(function () { done(r.privacy); }, 0); }).catch(fail);
+    }; });
+  }
+  var ava = function (u, size, cls) { return '<div class="' + (cls || '') + ' flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gold font-extrabold text-black" style="width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size / 3) + 'px">' + (u.avatar ? '<img src="' + esc(u.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(u.name))) + '</div>'; };
   function profilePage(handle) {
     var mine = !handle || (me && handle === me.handle);
     if (mine && !me) { authCta('Profil'); page.insertAdjacentHTML('beforeend', '<button id="cta-set" class="' + btn2 + ' mt-3 w-full">Paramètres</button>'); $('cta-set').onclick = function () { nav('/settings'); }; return; }
     var h = mine ? me.handle : handle;
     setPage(pageHead('Profil') + msg('Chargement…'));
     api('GET', '/api/users/' + encodeURIComponent(h)).then(function (u) {
-      var tabs = mine ? [['clips', 'Mes clips'], ['saved', 'Enregistrés'], ['followers', 'Abonnés']] : [['clips', 'Clips']];
+      if (u.private) {   // private profile, visitor not accepted: avatar + name + request button, nothing else
+        setPage(pageHead(esc(u.name)) + '<div class="flex flex-col items-center rounded-2xl bg-neutral-900 p-6 text-center">' + ava(u, 88) + '<div class="mt-3 text-lg font-extrabold">' + esc(u.name) + '</div><div class="text-xs text-neutral-400">@' + esc(u.handle) + '</div><div class="mt-4 text-sm text-neutral-300"><i data-lucide="lock" class="mr-1 inline h-4 w-4"></i>Ce profil est privé</div><button id="p-req" class="' + btn + ' mt-4"></button></div>');
+        var rq = u.requested, rb = $('p-req'), pr = function () { rb.textContent = rq ? 'Demande envoyée (annuler)' : 'Demande de suivi'; }; pr();
+        rb.onclick = guard(function () { var on = !rq; api('PUT', '/api/users/' + encodeURIComponent(u.handle) + '/follow', { on: on }).then(function (r) { rq = on && r.status === 'pending'; setFollowEverywhere(u.handle, on, r.status); if (r.status === 'accepted') return profilePage(u.handle); pr(); }).catch(fail); });
+        return;
+      }
+      var tabs = mine ? [['photos', 'Photos'], ['videos', 'Vidéos'], ['clips', 'Clips'], ['saved', 'Enregistrés']] : [['photos', 'Photos'], ['videos', 'Vidéos'], ['clips', 'Clips']];
+      var empty = mine && !u.bio && !u.avatar && !u.cover;
+      var shortLink = u.link ? u.link.replace(/^https?:\/\//, '').replace(/\/$/, '') : '';
       setPage(pageHead(mine ? 'Mon profil' : esc(u.name), mine ? '<button id="p-set" aria-label="Paramètres" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800"><i data-lucide="settings" class="h-5 w-5"></i></button>' : '') +
-        '<div class="mb-4 rounded-2xl bg-neutral-900 p-4"><div class="flex items-center gap-3"><div class="flex h-14 w-14 items-center justify-center rounded-full bg-gold text-lg font-extrabold text-black">' + esc(initials(u.name)) + '</div><div class="min-w-0"><div class="truncate text-lg font-extrabold">' + esc(u.name) + '</div><div class="text-xs text-neutral-400">@' + esc(u.handle) + ' · ' + esc(u.citizenId) + '</div></div></div>' +
+        '<div class="mb-4 overflow-hidden rounded-2xl bg-neutral-900">' +
+        '<div class="h-28 w-full bg-gradient-to-br from-amber-500/40 to-neutral-800">' + (u.cover ? '<img src="' + esc(u.cover) + '" alt="" class="h-full w-full object-cover">' : '') + '</div>' +
+        '<div class="px-4 pb-4"><div class="-mt-8 flex items-end justify-between">' + ava(u, 72, 'border-4 border-neutral-900') + (mine ? '<button id="p-edit" class="' + btn2 + ' !py-2">Modifier</button>' : '') + '</div>' +
+        '<div class="mt-2 truncate text-lg font-extrabold">' + esc(u.name) + '</div><div class="text-xs text-neutral-400">@' + esc(u.handle) + ' · ' + esc(u.citizenId) + '</div>' +
+        (u.bio ? '<p class="mt-2 whitespace-pre-wrap break-words text-sm text-neutral-200">' + esc(u.bio) + '</p>' : '') +
+        ((u.city || u.link) ? '<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-400">' + (u.city ? '<span>📍 ' + esc(u.city) + '</span>' : '') + (u.link ? '<a href="' + esc(u.link) + '" target="_blank" rel="noopener nofollow" class="text-amber-400">🔗 ' + esc(shortLink) + '</a>' : '') + '</div>' : '') +
+        (mine ? '<div id="p-req-box"></div>' : '') + (u.privateProfile && mine ? '<div class="mt-2 text-xs text-neutral-400"><i data-lucide="lock" class="mr-1 inline h-3 w-3"></i>Profil privé</div>' : '') + (empty ? '<div class="mt-3 flex flex-wrap gap-2"><button id="p-addph" class="' + btn + ' !py-2">Ajouter une photo</button><button id="p-addbio" class="' + btn2 + ' !py-2">Ajouter une bio</button></div>' : '') +
         '<div class="mt-4 grid grid-cols-3 gap-2">' + statBox(u.clips, 'Clips', 'clips') + statBox('<span id="p-fol">' + u.followers + '</span>', 'Abonnés', mine ? 'followers' : '') + statBox(u.following, 'Abonnements') + '</div>' +
         (mine ? '<div class="mt-3 flex gap-2"><button id="p-out" class="' + btn2 + ' flex-1">Se déconnecter</button><button id="p-up" class="' + btn + ' flex-1">Importer un clip</button></div>'
-          : '<div class="mt-3 flex gap-2"><button id="p-follow" class="' + btn + ' flex-1"></button><button id="p-msg" class="' + btn2 + ' flex-1">Message</button></div>') + '</div>' +
-        '<div id="p-tabs" class="mb-3 flex gap-2">' + tabs.map(function (t, k) { return '<button data-t="' + t[0] + '" class="tabbtn flex-1 rounded-full border px-3 py-2 text-sm font-bold ' + (k ? 'border-neutral-700 text-neutral-300' : 'border-amber-400 bg-amber-400 text-black') + '">' + t[1] + '</button>'; }).join('') + '</div><div id="p-body"></div>');
-      if (mine) { $('p-set').onclick = function () { nav('/settings'); }; $('p-out').onclick = logout; $('p-up').onclick = openUpload; }
-      else {
-        var fol = u.following_by_me, fb = $('p-follow');
-        var pf = function () { fb.textContent = fol ? 'Abonné ✓' : 'Suivre'; }; pf();
-        fb.onclick = guard(function () { var on = !fol; api('PUT', '/api/users/' + encodeURIComponent(u.handle) + '/follow', { on: on }).then(function (r) { fol = on; $('p-fol').textContent = r.followers; setFollowEverywhere(u.handle, on); pf(); }).catch(fail); });
+          : '<div class="mt-3 flex gap-2"><button id="p-follow" class="' + btn + ' flex-1"></button><button id="p-msg" class="' + btn2 + ' flex-1">Message</button></div>') + '</div></div>' +
+        '<div id="p-tabs" class="mb-3 flex gap-1.5">' + tabs.map(function (t, k) { return '<button data-t="' + t[0] + '" class="tabbtn flex-1 rounded-full border px-2 py-2 text-xs font-bold ' + (k ? 'border-neutral-700 text-neutral-300' : 'border-amber-400 bg-amber-400 text-black') + '">' + t[1] + '</button>'; }).join('') + '</div><div id="p-body"></div>');
+      if (mine) {
+        $('p-set').onclick = function () { nav('/settings'); }; $('p-out').onclick = logout; $('p-up').onclick = openUpload;
+        $('p-edit').onclick = function () { editProfile(u); };
+        api('GET', '/api/me/follow-requests').then(function (r) {
+          var box = $('p-req-box'); if (!box || !r.requests.length) return;
+          box.innerHTML = '<div class="mt-3 rounded-xl bg-neutral-800 p-3 text-sm"><div class="mb-2 font-bold">Demandes de suivi (' + r.requests.length + ')</div>' + r.requests.map(function (q) { return '<div class="mb-2 flex items-center gap-2" data-q="' + esc(q.handle) + '"><span class="min-w-0 flex-1 truncate"><b>' + esc(q.name) + '</b> <span class="text-xs text-neutral-400">@' + esc(q.handle) + '</span></span><button data-a="1" class="rounded-full bg-gold px-3 py-1.5 text-xs font-extrabold text-black">Accepter</button><button data-a="0" class="rounded-full border border-neutral-600 px-3 py-1.5 text-xs font-bold">Refuser</button></div>'; }).join('') + '</div>';
+          box.querySelectorAll('[data-a]').forEach(function (b) { b.onclick = function () { var row = b.closest('[data-q]'); api('POST', '/api/me/follow-requests/' + encodeURIComponent(row.dataset.q), { accept: b.dataset.a === '1' }).then(function () { row.remove(); if (!box.querySelector('[data-q]')) box.innerHTML = ''; if (b.dataset.a === '1') $('p-fol').textContent = (+$('p-fol').textContent || 0) + 1; }).catch(fail); }; });
+        }).catch(function () { /* requests load on next visit */ });
+        if (empty) { $('p-addph').onclick = function () { editProfile(u, 'avatar'); }; $('p-addbio').onclick = function () { editProfile(u, 'bio'); }; }
+      } else {
+        var fol = u.following_by_me, req = u.requested, fb = $('p-follow');
+        var pf = function () { fb.textContent = fol ? 'Abonné ✓' : req ? 'Demandé' : 'Suivre'; }; pf();
+        fb.onclick = guard(function () { var on = !(fol || req); api('PUT', '/api/users/' + encodeURIComponent(u.handle) + '/follow', { on: on }).then(function (r) { fol = on && r.status !== 'pending'; req = on && r.status === 'pending'; $('p-fol').textContent = r.followers; setFollowEverywhere(u.handle, on, r.status); pf(); }).catch(fail); });
         $('p-msg').onclick = (function () { if (!u.allowMessages) return toast('Ce créateur n’accepte pas les messages'); nav('/messages/' + encodeURIComponent(u.handle)); });
       }
       function tab(t) {
-        page.querySelectorAll('.tabbtn').forEach(function (b) { var on = b.dataset.t === t; b.className = 'tabbtn flex-1 rounded-full border px-3 py-2 text-sm font-bold ' + (on ? 'border-amber-400 bg-amber-400 text-black' : 'border-neutral-700 text-neutral-300'); });
+        page.querySelectorAll('.tabbtn').forEach(function (b) { var on = b.dataset.t === t; b.className = 'tabbtn flex-1 rounded-full border px-2 py-2 text-xs font-bold ' + (on ? 'border-amber-400 bg-amber-400 text-black' : 'border-neutral-700 text-neutral-300'); });
         var body = $('p-body'); body.innerHTML = msg('Chargement…');
+        if (t === 'photos' || t === 'videos') return gallery(body, u, t === 'videos' ? 'video' : 'photo', mine);
         var url = t === 'clips' ? '/api/users/' + encodeURIComponent(h) + '/clips' : t === 'saved' ? '/api/me/saved' : '/api/users/' + encodeURIComponent(h) + '/followers';
         api('GET', url).then(function (r) {
           if (r.private) { body.innerHTML = msg('Ce profil est privé.'); return; }
           if (t === 'followers') { body.innerHTML = r.followers.length ? r.followers.map(function (f) { return '<button data-u="' + esc(f.handle) + '" class="mb-2 flex w-full items-center gap-3 rounded-xl bg-neutral-900 p-3 text-left text-sm"><span class="flex h-9 w-9 items-center justify-center rounded-full bg-amber-400 font-extrabold text-black">' + esc(initials(f.name)) + '</span><span><b>' + esc(f.name) + '</b><br><span class="text-xs text-neutral-400">@' + esc(f.handle) + '</span></span></button>'; }).join('') : msg('Aucun abonné pour le moment.'); body.querySelectorAll('[data-u]').forEach(function (b) { b.onclick = function () { nav('/u/' + encodeURIComponent(b.dataset.u)); }; }); return; }
-          body.innerHTML = r.clips.length ? '<div class="grid grid-cols-3 gap-2">' + r.clips.map(tile).join('') + '</div>' : msg(t === 'saved' ? 'Rien d’enregistré pour le moment. Touchez le marque-page sous un clip.' : (mine ? 'Vous n’avez encore publié aucun clip.' : 'Aucun clip publié.'));
-          bindClips(body, r.clips);
+          body.innerHTML = r.clips.length ? '<div class="grid grid-cols-3 gap-2">' + r.clips.map(function (c) { return mine && t === 'clips' ? '<div class="relative">' + tile(c).replace('</button>', lockIcon(c.privacy) + '</button>') + dots('clip', c.id) + '</div>' : tile(c); }).join('') + '</div>' : msg(t === 'saved' ? 'Rien d’enregistré pour le moment. Touchez le marque-page sous un clip.' : (mine ? 'Vous n’avez encore publié aucun clip.' : 'Aucun clip publié.'));
+          bindClips(body, r.clips); icons();
+          body.querySelectorAll('[data-dots]').forEach(function (d) { d.onclick = function (e) { e.stopPropagation(); var c = r.clips.filter(function (x) { return x.id === d.dataset.dots; })[0]; privacyMenu('clip', c.id, c.privacy, function () { tab(t); }); }; });
         }).catch(function (e) { body.textContent = e.message; });
       }
       page.querySelectorAll('.tabbtn').forEach(function (b) { b.onclick = function () { tab(b.dataset.t); }; });
       page.querySelectorAll('[data-tabgo]').forEach(function (b) { b.onclick = function () { tab(b.dataset.tabgo); }; });
-      tab('clips');
+      tab('photos');
     }).catch(function (e) { setPage(pageHead('Profil') + msg(esc(e.message))); });
+  }
+
+  // gallery tab: photos or videos stored in R2; the owner can add (gallery or camera) and delete
+  function gallery(body, u, kind, mine) {
+    var photo = kind === 'photo';
+    function draw(items) {
+      body.innerHTML = (mine ? '<label for="g-pv" class="text-xs font-bold text-neutral-300">Visibilité des nouveaux ajouts</label><select id="g-pv" class="' + inp + ' mb-2 mt-1"><option value="public">Public</option><option value="followers">Abonnés uniquement</option><option value="private">Privé</option></select><label class="' + btn + ' mb-3 flex cursor-pointer items-center justify-center gap-2 text-center">' + (photo ? 'Ajouter une photo' : 'Ajouter une vidéo') + '<input id="g-file" type="file" class="sr-only" multiple accept="' + (photo ? 'image/jpeg,image/png,image/webp,image/gif' : 'video/mp4,video/quicktime,video/webm') + '"></label><div id="g-st" class="mb-2 text-xs text-neutral-400"></div>' : '') +
+        (items.length ? '<div class="grid grid-cols-3 gap-2">' + items.map(function (m) { return '<div class="relative aspect-square"><button data-m="' + m.id + '" class="relative h-full w-full overflow-hidden rounded-xl bg-neutral-800">' + (photo ? '<img src="' + esc(m.url) + '" loading="lazy" alt="" class="h-full w-full object-cover">' : '<video src="' + esc(m.url) + '#t=0.1" preload="metadata" muted playsinline class="h-full w-full object-cover"></video><span class="absolute bottom-1 right-1 rounded-full bg-black/60 px-1.5 text-[10px]">▶</span>') + lockIcon(m.privacy) + '</button>' + (mine ? dots('media', m.id) : '') + '</div>'; }).join('') + '</div>'
+          : (mine ? '<div class="rounded-2xl bg-neutral-900 p-5 text-center text-sm text-neutral-300">' + (photo ? 'Aucune photo pour le moment. Ajoutez votre première photo.' : 'Aucune vidéo pour le moment. Ajoutez votre première vidéo.') + '</div>' : msg(photo ? 'Aucune photo.' : 'Aucune vidéo.')));
+      body.querySelectorAll('[data-m]').forEach(function (b) { b.onclick = function () { var m = items.filter(function (x) { return String(x.id) === b.dataset.m; })[0]; view(m); }; });
+      icons();
+      body.querySelectorAll('[data-dots]').forEach(function (d) { d.onclick = function (e) { e.stopPropagation(); var m = items.filter(function (x) { return String(x.id) === d.dataset.dots; })[0]; privacyMenu('media', m.id, m.privacy, function (pv) { m.privacy = pv; draw(items); }); }; });
+      var f = $('g-file'); if (f) f.onchange = function () {
+        var files = Array.prototype.slice.call(f.files || []); f.value = ''; if (!files.length) return;
+        var st = $('g-st'), n = 0, bad = 0;
+        files.reduce(function (p, file, i) {
+          return p.then(function () {
+            return putFile(photo ? 'photo' : 'video', file, function (r) { st.textContent = 'Envoi ' + (i + 1) + '/' + files.length + ' : ' + Math.round(r * 100) + ' %'; })
+              .then(function (key) { return api('POST', '/api/me/media', { kind: kind, key: key, privacy: $('g-pv').value }); })
+              .then(function (r) { if (r.media) items.unshift(r.media); n++; })
+              .catch(function (e) { bad++; toast(e.message); });
+          });
+        }, Promise.resolve()).then(function () { if ($('g-file')) { draw(items); if (n) toast(n + (photo ? ' photo(s) ajoutée(s)' : ' vidéo(s) ajoutée(s)')); } });
+      };
+    }
+    function view(m) {
+      if (!m) return;
+      openModal(head(photo ? 'Photo' : 'Vidéo') + (photo ? '<img src="' + esc(m.url) + '" alt="" class="max-h-[60vh] w-full rounded-xl object-contain">' : '<video src="' + esc(m.url) + '" controls autoplay playsinline class="max-h-[60vh] w-full rounded-xl bg-black"></video>') + (mine ? '<button id="g-del" class="mt-3 w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer</button>' : ''));
+      if (mine) $('g-del').onclick = function () { api('DELETE', '/api/me/media/' + m.id).then(function () { var k = items.indexOf(m); if (k >= 0) items.splice(k, 1); closeOverlay(); setTimeout(function () { draw(items); }, 0); }).catch(fail); };
+    }
+    var items = [];
+    api('GET', '/api/users/' + encodeURIComponent(u.handle) + '/media?kind=' + kind).then(function (r) {
+      if (r.private) { body.innerHTML = msg('Ce profil est privé.'); return; }
+      items = r.items; draw(items);
+    }).catch(function (e) { body.textContent = e.message; });
+  }
+
+  // edit form (in the page, so the keyboard never covers a sheet): name, @username, bio, city, link, avatar, cover
+  function editProfile(u, focusId) {
+    var avatarFile = null, coverFile = null, fld = function (id, label, val, extra) { return '<label for="' + id + '" class="text-xs font-bold text-neutral-300">' + label + '</label>' + extra.replace('{v}', esc(val)); };
+    setPage(pageHead('Modifier le profil') +
+      '<form id="ed" class="flex flex-col gap-3" action="javascript:void(0)" novalidate>' +
+      '<div class="text-xs font-bold text-neutral-300">Photo de couverture</div><label class="relative block h-28 cursor-pointer overflow-hidden rounded-xl bg-neutral-800"><img id="ed-cv" alt="" class="h-full w-full object-cover ' + (u.cover ? '' : 'hidden') + '" ' + (u.cover ? 'src="' + esc(u.cover) + '"' : '') + '><span class="absolute inset-0 flex items-center justify-center bg-black/30 text-sm font-bold">Changer la couverture</span><input id="ed-cvf" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>' +
+      '<div class="text-xs font-bold text-neutral-300">Photo de profil</div><label class="flex cursor-pointer items-center gap-3"><span id="ed-av" class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gold text-xl font-extrabold text-black">' + (u.avatar ? '<img src="' + esc(u.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(u.name))) + '</span><span class="' + btn2 + '">Changer la photo</span><input id="ed-avf" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>' +
+      fld('ed-n', 'Nom', u.name, '<input id="ed-n" name="name" type="text" autocomplete="name" enterkeyhint="next" maxlength="40" value="{v}" class="' + inp + '">') +
+      fld('ed-u', 'Nom d’utilisateur', u.handle, '<input id="ed-u" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" maxlength="24" value="{v}" class="' + inp + '">') +
+      fld('ed-b', 'Bio', u.bio || '', '<textarea id="ed-b" name="bio" rows="3" maxlength="300" enterkeyhint="enter" placeholder="Parlez de vous…" class="' + inp + '">{v}</textarea>') +
+      fld('ed-c', 'Ville', u.city || '', '<input id="ed-c" name="city" type="text" autocomplete="address-level2" enterkeyhint="next" maxlength="60" value="{v}" class="' + inp + '">') +
+      fld('ed-l', 'Lien', u.link || '', '<input id="ed-l" name="link" type="url" inputmode="url" autocomplete="url" autocapitalize="none" enterkeyhint="done" maxlength="200" placeholder="https://…" value="{v}" class="' + inp + '">') +
+      '<div id="ed-err" role="alert" class="min-h-[18px] text-sm text-red-400"></div><div class="flex gap-2"><button type="button" id="ed-x" class="' + btn2 + ' flex-1">Annuler</button><button id="ed-go" class="' + btn + ' flex-1">Enregistrer</button></div></form>');
+    function pick(inpId, fn) { $(inpId).onchange = function () { var f = this.files && this.files[0]; if (!f) return; fn(f, URL.createObjectURL(f)); }; }
+    pick('ed-avf', function (f, url) { avatarFile = f; $('ed-av').innerHTML = '<img src="' + url + '" alt="" class="h-full w-full object-cover">'; });
+    pick('ed-cvf', function (f, url) { coverFile = f; var i = $('ed-cv'); i.src = url; i.classList.remove('hidden'); });
+    $('ed-x').onclick = function () { profilePage(); };
+    $('ed').onsubmit = function (e) {
+      e.preventDefault(); var go = $('ed-go'), err = $('ed-err'); err.textContent = ''; go.disabled = true; go.textContent = 'Enregistrement…';
+      var body = { display_name: $('ed-n').value, username: $('ed-u').value, bio: $('ed-b').value, city: $('ed-c').value, link: $('ed-l').value };
+      var up = function (slot, file, k) { return file ? putFile(slot, file).then(function (key) { body[k] = key; }) : Promise.resolve(); };
+      up('avatar', avatarFile, 'avatar_key').then(function () { return up('cover', coverFile, 'cover_key'); }).then(function () { return api('PATCH', '/api/me', body); })
+        .then(function (r) { me = r.user; paintEq(); toast('Profil enregistré'); profilePage(); })
+        .catch(function (x) { err.textContent = x.message; go.disabled = false; go.textContent = 'Enregistrer'; });
+    };
+    if (focusId === 'bio') { $('ed-b').focus(); } else if (focusId === 'avatar') { try { $('ed-avf').click(); } catch (x) { /* user taps */ } }
   }
   function logout() {
     api('POST', '/api/auth/logout').catch(function () { /* cookie cleared anyway */ }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/login', { replace: true }); });
@@ -484,9 +622,9 @@
     var signup = kind === 'signup', next = safeNext(new URLSearchParams(location.search).get('next'));
     var alt = '/' + (signup ? 'login' : 'signup') + (next ? '?next=' + encodeURIComponent(next) : '');
     setPage(pageHead(signup ? 'Créer un compte' : 'Connexion') + '<form id="au" class="flex flex-col gap-3" action="javascript:void(0)" novalidate>' +
-      (signup ? '<label class="text-xs font-bold text-neutral-300">Nom d’utilisateur<input id="au-u" autocomplete="username" autocapitalize="none" maxlength="24" placeholder="ex. mon_nom" class="' + inp + ' mt-1 font-normal"></label>' : '') +
-      '<label class="text-xs font-bold text-neutral-300">E-mail<input id="au-e" type="email" autocomplete="email" placeholder="vous@exemple.com" class="' + inp + ' mt-1 font-normal"></label>' +
-      '<label class="text-xs font-bold text-neutral-300">Mot de passe<input id="au-p" type="password" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" placeholder="' + (signup ? '8 caractères minimum' : 'Votre mot de passe') + '" class="' + inp + ' mt-1 font-normal"></label>' +
+      (signup ? '<label for="au-u" class="text-xs font-bold text-neutral-300">Nom d’utilisateur</label><input id="au-u" name="username" type="text" inputmode="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" maxlength="24" placeholder="ex. mon_nom" class="' + inp + ' font-normal">' : '') +
+      '<label for="au-e" class="text-xs font-bold text-neutral-300">E-mail</label><input id="au-e" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" placeholder="vous@exemple.com" class="' + inp + ' font-normal">' +
+      '<label for="au-p" class="text-xs font-bold text-neutral-300">Mot de passe</label><input id="au-p" name="password" type="password" inputmode="text" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="' + (signup ? '8 caractères minimum' : 'Votre mot de passe') + '" class="' + inp + ' font-normal">' +
       '<div id="au-err" role="alert" class="min-h-[18px] text-sm text-red-400"></div><button id="au-go" class="' + btn + '">' + (signup ? 'Créer mon compte' : 'Se connecter') + '</button></form>' +
       '<p class="mt-4 text-center text-sm text-neutral-400">' + (signup ? 'Déjà un compte ?' : 'Pas encore de compte ?') + ' <a id="au-alt" href="' + alt + '" class="font-bold text-amber-400">' + (signup ? 'Se connecter' : 'Créer un compte') + '</a></p>');
     $('au-alt').onclick = function (e) { e.preventDefault(); nav(alt, { replace: true }); };
@@ -510,11 +648,12 @@
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Compte</h3><div class="mb-5 flex flex-col gap-2"><div class="rounded-xl bg-neutral-900 p-3 text-sm"><div class="text-xs text-neutral-400">E-mail</div>' + esc(me.email) + '</div><form id="s-name" class="flex gap-2" action="javascript:void(0)"><input id="s-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Enregistrer</button></form></div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Langue</h3><div class="mb-5"><select id="s-lang" aria-label="Langue" class="' + inp + '"><option value="fr" selected>Français</option></select></div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Notifications</h3><div class="mb-5">' + sw('notifications', 'Notifications', 'Pastille de nouveaux messages sur l’onglet Messages') + '</div>' +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Confidentialité</h3><div class="mb-5 flex flex-col gap-2">' + sw('private_profile', 'Profil privé', 'Vos clips n’apparaissent plus dans la recherche ni sur votre profil public') + sw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire') + '</div>' +
+      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Confidentialité</h3><div class="mb-5 flex flex-col gap-2">' + '<div role="radiogroup" aria-label="Visibilité du profil" class="flex flex-col gap-2">' + [[false, 'Public', 'Tout le monde voit votre profil et votre galerie'], [true, 'Privé', 'Vous seul voyez tout ; les autres envoient une demande de suivi que vous acceptez ou refusez']].map(function (o) { var on = !!s.private_profile === o[0]; return '<button data-pp="' + o[0] + '" role="radio" aria-checked="' + on + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (on ? 'bg-amber-400 text-black' : 'bg-neutral-900') + '"><span><b>' + o[1] + '</b><span class="block text-xs ' + (on ? 'text-black/70' : 'text-neutral-400') + '">' + o[2] + '</span></span><span>' + (on ? '✓' : '') + '</span></button>'; }).join('') + '</div>' + sw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire') + '</div>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Session</h3><button id="s-out" class="' + btn2 + ' mb-5 w-full">Se déconnecter</button>' +
       '<h3 class="mb-2 text-xs font-bold uppercase text-red-400">Zone dangereuse</h3><button id="s-del" class="w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button>');
     bindQ();
     page.querySelectorAll('[data-k]').forEach(function (b) { b.onclick = function () { var k = b.dataset.k, p = {}; p[k] = !me.settings[k]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (k === 'notifications') badge(); settingsPage(); }).catch(fail); }; });
+    page.querySelectorAll('[data-pp]').forEach(function (b) { b.onclick = function () { api('PATCH', '/api/me', { private_profile: b.dataset.pp === 'true' }).then(function (r) { me = r.user; settingsPage(); }).catch(fail); }; });
     $('s-name').onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('s-dn').value }).then(function (r) { me = r.user; toast('Nom enregistré'); }).catch(fail); };
     $('s-out').onclick = logout;
     $('s-del').onclick = function () {
@@ -529,6 +668,7 @@
     var feedRoute = p === '/';
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === tabOf(p)); });
     $('hdr').classList.toggle('bare', feedRoute || viewer);
+    $('l-rail').hidden = !(feedRoute || viewer);
     updateBar();
   }
   function render() {
@@ -555,7 +695,7 @@
     else if (p === '/clips') clipsPage();
     else if (p === '/messages') messagesPage();
     else if ((m = /^\/messages\/([^/]+)$/.exec(p))) threadPage(decodeURIComponent(m[1]));
-    else if (p === '/profile') profilePage();
+    else if (p === '/profile' || p === '/profil') profilePage();
     else if ((m = /^\/u\/([^/]+)$/.exec(p))) profilePage(decodeURIComponent(m[1]));
     else if (p === '/settings') settingsPage();
     else if (p === '/login' || p === '/signup') { if (me) return nav(safeNext(q.get('next')) || '/profile', { replace: true }); authPage(p.slice(1)); }

@@ -176,19 +176,19 @@ const present = async (row, vs = {}) => ({
   // the feed never serves the original: 720p, and a 360p fallback (legacy clips without renditions keep the original until backfilled)
   url: await mediaUrl(row.v720_key || row.key, ver(row)), url360: row.v360_key ? await mediaUrl(row.v360_key, ver(row)) : null,
   poster: row.poster_key ? await mediaUrl(row.poster_key, ver(row)) : null,
-  title: row.title, description: row.description, comment: row.comment,
+  privacy: row.privacy, title: row.title, description: row.description, comment: row.comment,
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
-  author: { handle: row.handle, name: row.display_name },
+  author: { handle: row.handle, name: row.display_name, avatar: row.avatar_key && configured ? await mediaUrl(row.avatar_key) : null },
   tags: row.tags ? row.tags.split(' ') : [],
   likes: row.likes, comments: row.comments, saves: row.saves, shares: row.shares, views: row.views, createdAt: row.created_at,
-  viewer: { liked: !!vs.liked, saved: !!vs.saved, following: !!vs.following },
+  viewer: { liked: !!vs.liked, saved: !!vs.saved, following: !!vs.following, requested: !!vs.requested, favorited: !!vs.favorited },
 });
 // ---- accounts: session cookie `sid` -> users row. Reads work anonymously; every write needs a login. ----
 const SID = 'sid';
 const sidOf = (req) => (/(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '') || [])[1] || null;
 const secure = (req) => req.secure || req.headers['x-forwarded-proto'] === 'https';
 const setSid = (req, res, token) => res.cookie(SID, token, { maxAge: 30 * 864e5, httpOnly: true, sameSite: 'lax', secure: secure(req), path: '/' });
-const presentUser = (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language } });
+const presentUser = async (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, bio: u.bio, city: u.city, link: u.link, avatar: u.avatar_key && configured ? await mediaUrl(u.avatar_key) : null, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language } });
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use('/api', wrapMw(async (req) => {
   req.user = dbConfigured ? await db.userBySession(sidOf(req)) : null;
@@ -230,13 +230,13 @@ auth.post('/signup', throttle, wrap(async (req, res) => {
   const r = await db.signup({ email, username, password });
   if (r.error) return res.status(409).json({ error: r.error === 'email' ? 'Cette adresse e-mail a déjà un compte' : 'Ce nom d’utilisateur est déjà pris', field: r.error });
   setSid(req, res, await db.createSession(r.user.id));
-  res.json({ user: presentUser(r.user) });
+  res.json({ user: await presentUser(r.user) });
 }));
 auth.post('/login', throttle, wrap(async (req, res) => {
   const u = await db.login(String(req.body?.email || '').trim(), String(req.body?.password || ''));
   if (!u) return res.status(401).json({ error: 'E-mail ou mot de passe incorrect' });
   setSid(req, res, await db.createSession(u.id));
-  res.json({ user: presentUser(u) });
+  res.json({ user: await presentUser(u) });
 }));
 auth.post('/logout', wrap(async (req, res) => { await db.endSession(sidOf(req)); res.clearCookie(SID, { path: '/' }); res.json({ ok: true }); }));
 app.use('/api/auth', auth);
@@ -274,18 +274,22 @@ const followHandle = async (req, res, handle) => {
 };
 social.put('/clips/:id/follow', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; const r = await db.setFollow(req.user.id, c.author_id, flag(req)); if (r.error) return res.status(400).json({ error: 'vous ne pouvez pas vous suivre vous-même' }); res.json(r); }));
 social.put('/users/:handle/follow', needUser, wrap(async (req, res) => followHandle(req, res, req.params.handle)));
+const PRIVACY = ['public', 'private', 'followers'];
 const profileOf = async (req, handle) => {
-  const u = await db.citizen(String(handle).slice(0, 80), req.user?.id);
+  const u = await db.citizen(String(handle).slice(0, 80), req.viewer?.id || req.user?.id);
   if (!u) return null;
-  const me = req.user?.id === u.id, hidden = u.private_profile && !me;
-  return { handle: u.handle, name: u.display_name, citizenId: `#${u.year}-${u.seq}`, verified: u.clips > 0, clips: u.clips, followers: u.followers, following: u.following, me, following_by_me: u.followed, private: hidden, allowMessages: u.allow_messages, _id: u.id };
+  // a private profile shows only avatar + name (and the follow-request button) until the owner accepts the visitor
+  const me = req.user?.id === u.id, hidden = u.private_profile && !me && u.follow_status !== 'accepted';
+  const base = { handle: u.handle, name: u.display_name, me, private: hidden, privateProfile: u.private_profile, follow_status: u.follow_status || null, following_by_me: u.follow_status === 'accepted', requested: u.follow_status === 'pending', avatar: u.avatar_key && configured ? await mediaUrl(u.avatar_key) : null, _id: u.id };
+  if (hidden) return base;
+  return { ...base, citizenId: `#${u.year}-${u.seq}`, verified: u.clips > 0, clips: u.clips, followers: u.followers, following: u.following, allowMessages: u.allow_messages, bio: u.bio, city: u.city, link: u.link, cover: u.cover_key && configured ? await mediaUrl(u.cover_key) : null };
 };
 social.get('/citizen/:handle', wrap(async (req, res) => { const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' }); delete p._id; res.json(p); }));
 social.get('/users/:handle', wrap(async (req, res) => { const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' }); delete p._id; res.json(p); }));
 social.get('/users/:handle/clips', wrap(async (req, res) => {
   const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' });
   if (p.private) return res.json({ clips: [], next: null, private: true });
-  const { rows, next } = await dbFeed({ limit: 30, authorHandle: p.handle });
+  const { rows, next } = await dbFeed({ limit: 30, authorHandle: p.handle, viewerId: req.user?.id });
   res.json({ clips: await presentAll(req, rows), next });
 }));
 social.get('/users/:handle/followers', wrap(async (req, res) => {
@@ -307,13 +311,81 @@ social.get('/messages', needViewer, wrap(async (req, res) => {
   const t = await db.thread(req.viewer.id, w); if (!t) return res.status(404).json({ error: 'créateur introuvable' });
   res.json(t);
 }));
-social.get('/me', wrap(async (req, res) => res.json({ user: presentUser(req.user), unread: req.user ? await db.unreadCount(req.user.id) : 0 })));
+social.get('/me', wrap(async (req, res) => res.json({ user: await presentUser(req.user), unread: req.user ? await db.unreadCount(req.user.id) : 0 })));
 social.get('/me/saved', needViewer, wrap(async (req, res) => res.json({ clips: await presentAll(req, await db.savedClips(req.viewer.id)) })));
+const MEDIA_EXT = { photo: { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }, video: { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' } };
+const MEDIA_MAX = { photo: 25 * 1048576, video: 500 * 1048576 };
+const profileKeyOk = (uid, k) => typeof k === 'string' && k.startsWith(`profile/${uid}/`) && /^profile\/[\w-]+\/[\w.-]+\.(jpg|jpeg|png|webp|gif|mp4|mov|webm)$/.test(k);
+const needR2 = (req, res, next) => configured ? next() : res.status(503).json({ error: 'Stockage R2 non configuré' });
+// Presigned PUT straight to R2 for profile photos, cover, avatar and gallery items.
+social.post('/me/upload-url', needUser, needR2, wrap(async (req, res) => {
+  const slot = String(req.body?.slot || ''), ext = String(req.body?.ext || '').toLowerCase().replace('jpeg', 'jpg'), size = Number(req.body?.size);
+  const kind = slot === 'video' ? 'video' : ['avatar', 'cover', 'photo'].includes(slot) ? 'photo' : null;
+  if (!kind) return res.status(400).json({ error: 'type invalide' });
+  const ct = MEDIA_EXT[kind][ext] || MEDIA_EXT[kind][ext === 'jpg' ? 'jpeg' : ext];
+  if (!ct) return res.status(400).json({ error: kind === 'photo' ? 'Format non supporté (jpg, png, webp)' : 'Format non supporté (mp4, mov, webm)' });
+  if (!(size > 0) || size > MEDIA_MAX[kind]) return res.status(400).json({ error: `Fichier trop volumineux (max ${MEDIA_MAX[kind] / 1048576} Mo)` });
+  const key = `profile/${req.user.id}/${slot}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+  const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType: ct, CacheControl: IMMUTABLE }), { expiresIn: 3600 });
+  res.json({ key, url, contentType: ct, cacheControl: IMMUTABLE });
+}));
+// Registers an uploaded gallery item (after checking it exists in R2).
+social.post('/me/media', needUser, needR2, wrap(async (req, res) => {
+  const kind = req.body?.kind === 'video' ? 'video' : req.body?.kind === 'photo' ? 'photo' : null, key = req.body?.key;
+  if (!kind || !profileKeyOk(req.user.id, key) || !/\/(photo|video)-/.test(key)) return res.status(400).json({ error: 'requête invalide' });
+  try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })); } catch { return res.status(404).json({ error: 'Fichier absent de R2 : envoi incomplet' }); }
+  const privacy = PRIVACY.includes(req.body?.privacy) ? req.body.privacy : 'public';
+  const m = await db.addMedia(req.user.id, kind, key, privacy);
+  res.json({ media: m ? { id: m.id, kind, privacy, url: await mediaUrl(key), createdAt: m.created_at } : null });
+}));
+social.delete('/me/media/:id', needUser, wrap(async (req, res) => {
+  const key = /^\d+$/.test(req.params.id) ? await db.deleteMedia(req.user.id, req.params.id) : null;
+  if (!key) return res.status(404).json({ error: 'introuvable' });
+  if (configured) s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key })).catch(() => {});
+  res.json({ ok: true });
+}));
+social.get('/users/:handle/media', wrap(async (req, res) => {
+  const p = await profileOf(req, req.params.handle); if (!p) return res.status(404).json({ error: 'créateur introuvable' });
+  const kind = req.query.kind === 'video' ? 'video' : 'photo';
+  if (p.private) return res.json({ items: [], private: true });
+  const rows = configured ? await db.listMedia(p._id, kind, req.user?.id) : [];
+  res.json({ items: await Promise.all(rows.map(async (r) => ({ id: r.id, kind: r.kind, privacy: r.privacy, url: await mediaUrl(r.key), createdAt: r.created_at }))) });
+}));
+social.patch('/me/media/:id', needUser, wrap(async (req, res) => {
+  if (!/^\d+$/.test(req.params.id) || !PRIVACY.includes(req.body?.privacy)) return res.status(400).json({ error: 'requête invalide' });
+  if (!(await db.setMediaPrivacy(req.user.id, req.params.id, req.body.privacy))) return res.status(404).json({ error: 'introuvable' });
+  res.json({ ok: true, privacy: req.body.privacy });
+}));
+social.patch('/clips/:id/privacy', needUser, wrap(async (req, res) => {
+  if (!clipId(req.params.id) || !PRIVACY.includes(req.body?.privacy)) return res.status(400).json({ error: 'requête invalide' });
+  if (!(await db.setClipPrivacy(req.user.id, req.params.id, req.body.privacy))) return res.status(404).json({ error: 'clip introuvable' });
+  res.json({ ok: true, privacy: req.body.privacy });
+}));
+social.get('/me/follow-requests', needUser, wrap(async (req, res) => res.json({ requests: await db.pendingRequests(req.user.id) })));
+social.post('/me/follow-requests/:handle', needUser, wrap(async (req, res) => {
+  if (!(await db.answerRequest(req.user.id, String(req.params.handle).slice(0, 80), req.body?.accept === true))) return res.status(404).json({ error: 'demande introuvable' });
+  res.json({ ok: true });
+}));
+social.put('/clips/:id/favorite', needUser, wrap(async (req, res) => { const c = await clipOr404(req, res); if (!c) return; res.json(await db.setFavorite(req.user.id, c.id, flag(req))); }));
 social.patch('/me', needUser, wrap(async (req, res) => {
   const b = req.body || {}, s = {};
   for (const k of ['notifications', 'private_profile', 'allow_messages']) if (typeof b[k] === 'boolean') s[k] = b[k];
-  if (typeof b.display_name === 'string') { const n = b.display_name.trim().slice(0, 40); if (n.length < 2) return res.status(400).json({ error: 'Nom trop court' }); s.display_name = n; }
-  res.json({ user: presentUser(await db.updateSettings(req.user.id, s)) });
+  if (typeof b.display_name === 'string') { const n = b.display_name.trim().slice(0, 40); if (n.length < 2) return res.status(400).json({ error: 'Nom trop court', field: 'name' }); s.display_name = n; }
+  if (typeof b.username === 'string') { const h = b.username.trim().replace(/^@/, '').toLowerCase(); if (!/^[a-z0-9_.]{3,24}$/.test(h)) return res.status(400).json({ error: 'Nom d’utilisateur : 3 à 24 caractères (lettres, chiffres, _ ou .)', field: 'username' }); if (h !== req.user.handle) s.handle = h; }
+  if (typeof b.bio === 'string') s.bio = b.bio.trim().slice(0, 300);
+  if (typeof b.city === 'string') s.city = b.city.trim().slice(0, 60);
+  if (typeof b.link === 'string') {
+    let l = b.link.trim().slice(0, 200);
+    if (l) { if (!/^https?:\/\//i.test(l)) l = 'https://' + l; try { const u = new URL(l); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes('.')) throw 0; l = u.href; } catch { return res.status(400).json({ error: 'Lien invalide', field: 'link' }); } }
+    s.link = l;
+  }
+  for (const [k, col] of [['avatar_key', 'avatar_key'], ['cover_key', 'cover_key']]) if (b[k] != null) {
+    if (!profileKeyOk(req.user.id, b[k]) || !b[k].includes(`/${k.split('_')[0]}-`)) return res.status(400).json({ error: 'image invalide' });
+    s[col] = b[k];
+  }
+  const r = await db.updateSettings(req.user.id, s);
+  if (r.error) return res.status(409).json({ error: 'Ce nom d’utilisateur est déjà pris', field: 'username' });
+  res.json({ user: await presentUser(r.user) });
 }));
 social.delete('/me', needUser, wrap(async (req, res) => {
   const keys = await db.deleteAccount(req.user.id, String(req.body?.password || ''));
@@ -326,7 +398,8 @@ app.use('/api', social);
 
 // One DB row per clip (id is the primary key, so a retry can never create a duplicate).
 api.post('/publish', needDb, needUser, wrap(async (req, res) => {
-  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false, trim = null, filter = '' } = req.body;
+  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false, trim = null, filter = '', privacy = 'public' } = req.body;
+  if (!PRIVACY.includes(privacy)) return res.status(400).json({ error: 'visibilité invalide' });
   if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
   if (String(title).trim().length < 2 || /\b(?:VID|IMG|MOV|MVI|PXL|DSC|WA)[-_ ]*\d/i.test(title)) return res.status(400).json({ error: 'Titre requis (pas un nom de fichier)' });
   const music = musicId ? musicById(musicId) : null;
@@ -342,7 +415,7 @@ api.post('/publish', needDb, needUser, wrap(async (req, res) => {
   const row = await upsertClip({
     id: idOf(key), userId: req.user.id, key, posterKey: pk, v720Key: rend.v720, v360Key: rend.v360, title: String(title).trim().slice(0, 120),
     description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
-    musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
+    privacy, musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
   });
   res.json((await presentAll(req, [row]))[0]);
 }));
@@ -361,7 +434,7 @@ const clipId = (id) => typeof id === 'string' && /^[\w.-]+$/.test(id) && id.leng
 api.get('/clips/:id', needDb, wrap(async (req, res) => {
   if (!clipId(req.params.id)) return res.status(400).json({ error: 'bad request' });
   const row = await clipById(req.params.id);
-  if (!row) return res.status(404).json({ error: 'clip introuvable' });
+  if (!row || !(await db.clipVisible(row.id, req.user?.id))) return res.status(404).json({ error: 'clip introuvable' });
   res.set('Cache-Control', 'no-store').json((await presentAll(req, [row]))[0]);
 }));
 
