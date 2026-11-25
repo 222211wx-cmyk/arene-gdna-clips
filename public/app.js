@@ -333,15 +333,16 @@
 
   /* share sheet: copy / native share / WhatsApp, each recorded in the database */
   $('r-share').onclick = function () {
-    var c = cur(); if (!c) return; var url = BASE + '/c/' + encodeURIComponent(c.id), text = label(c);
+    var c = cur(); if (!c) return; var url = location.origin + '/c/' + encodeURIComponent(c.id), text = label(c);
     openModal(head('Partager') + '<div class="mb-3 truncate rounded-xl bg-neutral-800 px-3 py-2.5 text-sm text-neutral-300" id="sh-url">' + esc(url) + '</div><div class="flex flex-col gap-2">' +
       '<button id="sh-copy" class="' + btn + '">Copier le lien</button>' +
-      (navigator.share ? '<button id="sh-native" class="' + btn2 + '">Partager via…</button>' : '') +
+      (navigator.share ? '<button id="sh-native" class="' + btn2 + '">Envoyer à un contact…</button>' : '<a id="sh-sms" href="sms:?&body=' + encodeURIComponent(text + ' ' + url) + '" class="' + btn2 + ' text-center">Envoyer par SMS</a>') +
       '<a id="sh-wa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(text + ' ' + url) + '" class="' + btn2 + ' text-center">WhatsApp</a></div>');
     function rec(channel) { return api('POST', '/api/clips/' + encodeURIComponent(c.id) + '/share', { channel: channel }).then(function (r) { c.shares = r.count; if (cur() === c) paint(); }).catch(function () { /* count refreshes on next load */ }); }
     $('sh-copy').onclick = function () { copyText(url).then(function () { $('sh-copy').textContent = 'Lien copié ✓'; rec('link'); }); };
     if ($('sh-native')) $('sh-native').onclick = function () { navigator.share({ title: text, url: url }).then(function () { rec('native'); }).catch(function () { /* cancelled */ }); };
     $('sh-wa').onclick = function () { rec('whatsapp'); };
+    if ($('sh-sms')) $('sh-sms').onclick = function () { rec('sms'); };
   };
 
   /* comments */
