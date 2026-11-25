@@ -11,6 +11,7 @@ import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
 import { ask as askAI, askClip } from './ai.js';
 import { transcode, FILTERS } from './transcode.js';
+import { extractArchive, pieceSize, ARCHIVE_EXTS } from './extract.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as db from './db.js';
 import { dbConfigured, migrate, getDefaultUserId, feed as dbFeed, clipById, upsertClip, knownKeys } from './db.js';
@@ -49,11 +50,11 @@ const s3 = configured && new S3Client({
   credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
 });
 
-const PART_SIZE = 10 * 1024 * 1024;          // multipart part size (R2 minimum is 5 MB except last)
-const SINGLE_MAX = 10 * 1024 * 1024;         // <= 10 MB: one presigned PUT; above: multipart
-const MAX_SIZE = 4 * 1024 * 1024 * 1024;          // upload cap
+const R2_MAX = 5 * 1024 ** 4;                // R2's own hard object limit (5 TiB). No app-level cap below it.
 const TYPES = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 const keyOk = (k) => typeof k === 'string' && /^clips\/[\w.-]+\.(mp4|mov|webm)$/.test(k);
+// uploader keys: a video (clips/) or an archive waiting to be unpacked (uploads/)
+const upKeyOk = (k) => keyOk(k) || (typeof k === 'string' && new RegExp(`^uploads/[\\w.-]+\\.(${ARCHIVE_EXTS.join('|')})$`).test(k));
 const idOf = (k) => k.slice(6, k.lastIndexOf('.'));
 const metaKey = (k) => `meta/${idOf(k)}.json`;
 const posterKey = (k) => `posters/${idOf(k)}.jpg`;
@@ -95,26 +96,24 @@ app.get('/api/music/:id/audio', wrap(async (req, res) => {
 app.post('/api/ask', wrap(async (req, res) => res.json(await askClip(String(req.body.prompt || '').slice(0, 500), req.body.clip || {}))));
 app.post('/api/ai', wrap(async (req, res) => res.json(await askAI(String(req.body.prompt || '').slice(0, 500), req.body.context || {}))));
 const api = express.Router();
-api.use(['/upload-url', '/poster-url', '/upload', '/upload-complete', '/publish'], (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Connexion requise', code: 'auth' })));
+api.use(['/upload-url', '/poster-url', '/upload', '/upload-complete', '/extract', '/publish'], (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Connexion requise', code: 'auth' })));
 api.use((req, res, next) => configured ? next()
   : res.status(503).json({ error: 'R2 non configuré: R2_ACCOUNT_ID (ou R2_ENDPOINT), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET' }));
 
-// Step 1: presigned URL. Small file -> one PUT; large file -> multipart (parts signed via /upload/part-url).
+// Step 1: open the upload. Every file (any size) is a multipart upload of equal pieces; the browser sends the pieces straight to R2.
 api.post('/upload-url', wrap(async (req, res) => {
   const size = Number(req.body.size);
   const ext = String(req.body.ext || 'mp4').toLowerCase();
-  if (!TYPES[ext]) return res.status(400).json({ error: 'format non supporté (mp4, mov, webm)' });
-  if (!(size > 0) || size > MAX_SIZE) return res.status(400).json({ error: `taille invalide (max ${MAX_SIZE / 1048576} MB)` });
+  const isVideo = !!TYPES[ext];
+  if (!isVideo && !ARCHIVE_EXTS.includes(ext)) return res.status(400).json({ error: 'format non supporté (vidéo mp4/mov/webm ou archive zip/7z/rar/tar/gz)' });
+  if (!Number.isSafeInteger(size) || size <= 0 || size > R2_MAX) return res.status(400).json({ error: 'taille invalide (limite technique de R2 : 5 TB)' });
   const h = await checkBucket();
   if (!h.ok) return res.status(503).json({ error: h.error });
-  const key = `clips/${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-  const ContentType = TYPES[ext];
-  if (size <= SINGLE_MAX) {
-    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType, CacheControl: IMMUTABLE }), { expiresIn: 3600 });
-    return res.json({ mode: 'single', key, url, contentType: ContentType, cacheControl: IMMUTABLE });
-  }
+  const key = `${isVideo ? 'clips' : 'uploads'}/${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+  const ContentType = TYPES[ext] || 'application/octet-stream';
   const r = await s3.send(new CreateMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, ContentType, CacheControl: IMMUTABLE }));
-  res.json({ mode: 'multipart', key, uploadId: r.UploadId, partSize: PART_SIZE, contentType: ContentType });
+  const partSize = pieceSize(size);
+  res.json({ key, uploadId: r.UploadId, partSize, totalParts: Math.ceil(size / partSize) });
 }));
 
 // Poster (first-frame jpg) uploaded straight to R2 next to the clip.
@@ -127,8 +126,8 @@ api.post('/poster-url', wrap(async (req, res) => {
 
 api.post('/upload/part-url', wrap(async (req, res) => {
   const { key, uploadId, partNumber } = req.body;
-  if (!keyOk(key) || !uploadId || !(partNumber >= 1 && partNumber <= 10000)) return res.status(400).json({ error: 'bad request' });
-  const url = await getSignedUrl(s3, new UploadPartCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId, PartNumber: partNumber }), { expiresIn: 3600 });
+  if (!upKeyOk(key) || !uploadId || !(partNumber >= 1 && partNumber <= 10000)) return res.status(400).json({ error: 'bad request' });
+  const url = await getSignedUrl(s3, new UploadPartCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId, PartNumber: partNumber }), { expiresIn: 24 * 3600 });
   res.json({ url });
 }));
 
@@ -141,32 +140,53 @@ async function listAllParts(key, uploadId) {
     marker = r.NextPartNumberMarker;
   }
 }
+const headSize = (key) => s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })).then((h) => h.ContentLength).catch(() => null);
 
-// Resume: which parts R2 already has for this upload.
+// Resume: R2 is the truth. Which pieces R2 already holds for this upload (or: the upload already finished).
 api.get('/upload/parts', wrap(async (req, res) => {
   const { key, uploadId } = req.query;
-  if (!keyOk(key) || !uploadId) return res.status(400).json({ error: 'bad request' });
+  if (!upKeyOk(key) || !uploadId) return res.status(400).json({ error: 'bad request' });
   try { res.json({ parts: (await listAllParts(key, uploadId)).map((p) => ({ partNumber: p.PartNumber, size: p.Size })) }); }
-  catch (e) { if (e.name === 'NoSuchUpload') return res.json({ gone: true, parts: [] }); throw e; }
+  catch (e) {
+    if (e.name !== 'NoSuchUpload') throw e;
+    const size = await headSize(key);
+    res.json(size ? { complete: true, size, parts: [] } : { gone: true, parts: [] });
+  }
 }));
 
-// Step 3: confirm. Verifies the object exists in R2 (completes multipart first when needed).
+// Last step: R2 glues the pieces into one object.
 api.post(['/upload-complete', '/upload/complete'], wrap(async (req, res) => {
   const { key, uploadId, totalParts } = req.body;
-  if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
-  if (!uploadId) {
-    try { const h = await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })); return res.json({ key, size: h.ContentLength }); }
-    catch { return res.status(404).json({ error: 'fichier absent de R2: envoi incomplet' }); }
-  }
-  const parts = await listAllParts(key, uploadId);
+  if (!upKeyOk(key) || !uploadId) return res.status(400).json({ error: 'bad request' });
+  let parts;
+  try { parts = await listAllParts(key, uploadId); }
+  catch (e) { if (e.name !== 'NoSuchUpload') throw e; const size = await headSize(key); if (size) return res.json({ key, size }); return res.status(404).json({ error: 'envoi introuvable dans R2' }); }
   if (parts.length !== totalParts) return res.status(409).json({ error: `parties manquantes: ${parts.length}/${totalParts}` });
   await s3.send(new CompleteMultipartUploadCommand({
     Bucket: R2_BUCKET, Key: key, UploadId: uploadId,
     MultipartUpload: { Parts: parts.map(({ PartNumber, ETag }) => ({ PartNumber, ETag })) },
   }));
-  const h = await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key })).catch(() => null);
-  res.json({ key, size: h?.ContentLength });
+  res.json({ key, size: await headSize(key) });
 }));
+
+// Archives (zip, 7z, rar, tar, gz): unpacked in the background, one job at a time; the client polls the job.
+const jobs = new Map(); let jobChain = Promise.resolve();
+api.post('/extract', wrap(async (req, res) => {
+  const { key } = req.body;
+  if (!upKeyOk(key) || keyOk(key)) return res.status(400).json({ error: 'bad request' });
+  const id = crypto.randomBytes(8).toString('hex');
+  const job = { id, userId: req.user.id, step: 'queued', pct: 0 };
+  jobs.set(id, job); setTimeout(() => jobs.delete(id), 6 * 3600 * 1000).unref();
+  const run = () => extractArchive({ s3, bucket: R2_BUCKET, key, onProgress: (p) => Object.assign(job, p) })
+    .then((clips) => Object.assign(job, { step: 'done', pct: 100, clips })).catch((e) => { console.error('[extract]', e.message); Object.assign(job, { step: 'error', error: e.message.slice(0, 200) }); });
+  jobChain = jobChain.then(run);
+  res.json({ id });
+}));
+api.get('/extract/:id', (req, res) => {
+  const j = jobs.get(req.params.id);
+  if (!j || j.userId !== req.user?.id) return res.status(404).json({ error: 'tâche introuvable (le serveur a redémarré ? réessayez)' });
+  res.json(j);
+});
 
 // Clip URLs: CDN when R2_PUBLIC_URL is set, otherwise short-lived signed R2 URLs.
 const mediaUrl = async (key, ver) => CDN ? `${CDN}/${key}${ver ? `?v=${ver}` : ''}` : getSignedUrl(s3, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
@@ -462,7 +482,7 @@ api.post('/publish', needDb, needUser, wrap(async (req, res) => {
 
 api.post('/upload/abort', wrap(async (req, res) => {
   const { key, uploadId } = req.body;
-  if (!keyOk(key) || !uploadId) return res.status(400).json({ error: 'bad request' });
+  if (!upKeyOk(key) || !uploadId) return res.status(400).json({ error: 'bad request' });
   await s3.send(new AbortMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId }));
   res.json({ ok: true });
 }));
@@ -534,7 +554,7 @@ migrate().then(() => { console.log(dbConfigured ? '[db] ready' : '[db] DATABASE_
 
 app.get('/api/config', async (req, res) => {
   const h = await checkBucket(req.query.force === '1');
-  res.json({ configured, db: dbConfigured, cdn: !!CDN, build: BUILD_ID, bucketOk: !!h.ok, error: h.ok ? undefined : h.error, maxMB: MAX_SIZE / 1048576 });
+  res.json({ configured, db: dbConfigured, cdn: !!CDN, build: BUILD_ID, bucketOk: !!h.ok, error: h.ok ? undefined : h.error });
 });
 app.use('/api', api);
 app.use('/vendor/ffmpeg', express.static(nm('@ffmpeg/ffmpeg/dist/esm')));
