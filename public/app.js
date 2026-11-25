@@ -317,7 +317,6 @@
     b.innerHTML = me.avatar ? '<img src="' + esc(me.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(me.name));
   }
   $('l-eq').onclick = function () { nav('/profile'); };
-  $('l-set').onclick = function () { nav('/settings'); };
   $('l-cap').onclick = function () {
     var c = cur(); if (!c) return;
     var t = titleOf(c), d = capOf(c), cm = cleanTitle(c.comment);
@@ -488,7 +487,6 @@
       tbtn('tb-del', '🗑️', 'Supprimer', c ? (mine ? 'Supprimer ce clip' : 'Réservé au propriétaire') : none, !c || !mine) +
       tbtn('tb-zoom', '🔍', 'Zoom', none || '100 % → 150 % → 200 %', !c) +
       tbtn('tb-pc', '🖥️', 'Mode PC / Petit écran', none || 'Fenêtre fixe 800×450', !c) +
-      tbtn('tb-full', '⛶', 'Plein écran', none, !c) +
       tbtn('tb-vol', soundOn ? '🔊' : '🔇', 'Volume', soundOn ? 'Son activé : toucher pour couper' : 'Son coupé : toucher pour activer', !c) +
       tbtn('tb-dl', '📥', 'Télécharger', c ? (dl ? 'Enregistrer le clip' : 'Désactivé par le propriétaire') : none, !c || !dl) +
       (mine ? tbtn('tb-dlset', '🔓', c.allowDownload !== false ? 'Téléchargement : autorisé' : 'Téléchargement : interdit', 'Toucher pour changer') : '') +
@@ -511,12 +509,6 @@
     });
     on('tb-zoom', function () { closeOverlay(); setTimeout(function () { $('zoom-bar').hidden = false; zoomSet(1.5); }, 60); });
     on('tb-pc', function () { openPc(c); });
-    on('tb-full', function () {
-      var el = v, f = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitEnterFullscreen;
-      if (!f) return toast('Plein écran non disponible sur cet appareil');
-      try { var r = f.call(el); if (r && r.catch) r.catch(function () { toast('Plein écran refusé'); }); } catch (e) { toast('Plein écran refusé'); }
-      el.controls = true; closeOverlay();
-    });
     on('tb-vol', function () { setSound(!soundOn); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
     on('tb-dl', function () { var a = document.createElement('a'); a.href = '/api/clips/' + encodeURIComponent(c.id) + '/download'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); toast('Téléchargement…'); });
     on('tb-dlset', guard(function () {

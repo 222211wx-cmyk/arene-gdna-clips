@@ -88,6 +88,9 @@
   <aside id="l-rail" class="flex flex-col items-center gap-3">
     <button id="l-cap" aria-label="Titre et légende" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="type" class="h-5 w-5"></i></button>
     <button id="l-fav" aria-label="Favori" aria-pressed="false" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="star" class="h-5 w-5"></i></button>
+    <button id="t-card" aria-label="Citizen Card" title="Citizen Card" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="id-card" class="h-5 w-5"></i></button>
+    <button id="t-msg" aria-label="Message" title="Message" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="send" class="h-5 w-5"></i></button>
+    <button id="t-ai" aria-label="Ask AI" title="Ask AI" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="sparkles" class="h-5 w-5 text-gold"></i></button>
   </aside>
 
   <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
@@ -98,19 +101,11 @@
         <span class="min-w-0 leading-tight"><span id="author" class="block truncate text-[15px] font-bold txs"></span><span id="handle" class="block truncate text-xs text-white/75 txs"></span></span>
       </button>
       <button id="follow" class="ml-1 shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
-      <div id="l-grp" class="ml-auto flex shrink-0 items-center gap-1 rounded-full bg-black/55 p-1 ring-1 ring-white/30">
-        <button id="l-eq" aria-label="Mon profil" class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-xs font-extrabold text-black"><span id="l-eq-t">EQ</span></button>
-        <button id="l-set" aria-label="Paramètres" class="rail-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10"><i data-lucide="settings" class="h-[18px] w-[18px]"></i></button>
-      </div>
+      <button id="l-eq" aria-label="Mon profil" class="ml-auto flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-xs font-extrabold text-black shadow-lg"><span id="l-eq-t">EQ</span></button>
     </div>
     <p class="mt-2 line-clamp-2 text-sm leading-snug txs"><b id="c-title" class="font-extrabold"></b> <span id="caption"></span></p>
   </section>
 
-  <div class="absolute left-3 z-20 flex gap-2 bottom-[calc(env(safe-area-inset-bottom)+72px)]">
-    <button id="t-card" aria-label="Citizen Card" title="Citizen Card" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="id-card" class="h-[18px] w-[18px]"></i></button>
-    <button id="t-msg" aria-label="Message" title="Message" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="send" class="h-[18px] w-[18px]"></i></button>
-    <button id="t-ai" aria-label="Ask AI" title="Ask AI" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="sparkles" class="h-[18px] w-[18px] text-gold"></i></button>
-  </div>
 
   <!-- Views: real count from the database, bottom-right above Profil -->
   <div id="views" class="absolute right-3 z-20 flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-xs font-bold ring-1 ring-white/20 bottom-[calc(env(safe-area-inset-bottom)+76px)]" aria-label="Vues"><span aria-hidden="true">👁️</span><span id="views-n">0</span></div>
