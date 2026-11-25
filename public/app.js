@@ -168,7 +168,23 @@
   if (io) io.observe(v);
   $('replay').onclick = function () { resetLoops(); userPaused = false; v.currentTime = 0; tryPlay(); };
   function paintSound() { $('r-snd').querySelector('i,svg').outerHTML = '<i data-lucide="' + (soundOn ? 'volume-2' : 'volume-x') + '" class="h-5 w-5"></i>'; icons(); }
-  $('r-snd').onclick = function () { soundOn = !soundOn; v.muted = !soundOn; paintSound(); };
+  // volume button opens a small panel: mute / unmute + level slider; the choice is kept (localStorage) until the user changes it
+  var vol = (function () { try { var x = parseFloat(localStorage.getItem('vol')); return x >= 0 && x <= 1 ? x : 1; } catch (e) { return 1; } })();
+  function applyVol() { [v, buf, $('pc-v')].forEach(function (el) { try { el.volume = vol; } catch (e) { /* iOS: read-only */ } }); }
+  function paintVol() {
+    $('vol-range').value = Math.round(vol * 100); $('vol-n').textContent = soundOn ? Math.round(vol * 100) + '%' : 'Muet';
+    $('vol-mute').innerHTML = '<i data-lucide="' + (soundOn ? 'volume-2' : 'volume-x') + '" class="h-5 w-5"></i>'; icons();
+  }
+  var volTimer;
+  function volOpen() { $('vol-pop').hidden = false; paintVol(); clearTimeout(volTimer); volTimer = setTimeout(function () { $('vol-pop').hidden = true; }, 6000); }
+  function volKeep() { clearTimeout(volTimer); volTimer = setTimeout(function () { $('vol-pop').hidden = true; }, 6000); }
+  $('r-snd').onclick = function () { if ($('vol-pop').hidden) volOpen(); else $('vol-pop').hidden = true; };
+  $('vol-mute').onclick = function () { soundOn = !soundOn; if (soundOn && vol === 0) vol = 0.5; v.muted = !soundOn; buf.muted = !soundOn; applyVol(); paintSound(); paintVol(); volKeep(); };
+  $('vol-range').oninput = function () {
+    vol = this.value / 100; try { localStorage.setItem('vol', String(vol)); } catch (e) { /* ignore */ }
+    soundOn = vol > 0; v.muted = !soundOn; buf.muted = !soundOn; applyVol(); paintSound(); paintVol(); volKeep();
+  };
+  applyVol();
 
   function show(dir) {
     var c = cur(); if (!c) { v.removeAttribute('src'); v.load(); poster.classList.add('hidden'); shownId = null; $('views-n').textContent = '0'; return paint(); }
@@ -188,7 +204,7 @@
     tryPlay();
     prime();
     if (L === feedClips && idx >= L.length - 3) more();
-    zoomReset(); countView(c);
+    applyVol(); zoomReset(); countView(c);
     paint(); updateBar();
     if (dir) { v.classList.remove('slide-up', 'slide-down'); void v.offsetWidth; v.classList.add(dir > 0 ? 'slide-up' : 'slide-down'); }
   }
@@ -486,7 +502,7 @@
       try { var r = f.call(el); if (r && r.catch) r.catch(function () { toast('Plein écran refusé'); }); } catch (e) { toast('Plein écran refusé'); }
       el.controls = true; closeOverlay();
     });
-    on('tb-vol', function () { soundOn = !soundOn; v.muted = !soundOn; buf.muted = !soundOn; paintSound(); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
+    on('tb-vol', function () { soundOn = !soundOn; v.muted = !soundOn; buf.muted = !soundOn; applyVol(); paintSound(); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
     on('tb-dl', function () { var a = document.createElement('a'); a.href = '/api/clips/' + encodeURIComponent(c.id) + '/download'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); toast('Téléchargement…'); });
     on('tb-dlset', guard(function () {
       var allow = !(c.allowDownload !== false);
@@ -530,7 +546,7 @@
     var pcv = $('pc-v'), box = $('pc-back');
     v.pause();
     openOverlay(function () { pcv.pause(); pcv.removeAttribute('src'); pcv.load(); box.hidden = true; });
-    $('pc-t').textContent = label(c); pcv.src = srcOf(c); pcv.muted = !soundOn; box.hidden = false;
+    $('pc-t').textContent = label(c); pcv.src = srcOf(c); pcv.muted = !soundOn; applyVol(); box.hidden = false;
     var p = pcv.play(); if (p && p.catch) p.catch(function () { /* user presses play */ });
     modal.hidden = true; back.hidden = true; modal.innerHTML = '';
   }
