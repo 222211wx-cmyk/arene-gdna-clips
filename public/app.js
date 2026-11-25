@@ -390,6 +390,11 @@
   };
 
 
+  function deleteAccountModal() {
+      openModal(head('Supprimer mon compte') + '<p class="mb-3 text-sm text-neutral-300">Cette action est définitive : votre compte, vos clips, commentaires et messages seront supprimés. Entrez votre mot de passe pour confirmer.</p><form id="d-f" class="flex flex-col gap-3" action="javascript:void(0)"><input id="d-p" type="password" autocomplete="current-password" placeholder="Mot de passe" class="' + inp + '"><div id="d-err" class="min-h-[18px] text-sm text-red-400"></div><button class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-extrabold text-white">Supprimer définitivement</button></form>');
+      $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
+  }
+
   /* ================= Toolbox (⋮ under Home): clip tools + profile / account tools ================= */
   var zoomK = 1, zx = 0, zy = 0, ZSTEPS = [1, 1.5, 2];
   function zoomApply() {
@@ -419,6 +424,24 @@
   var isMine = function (c) { return !!(me && c && c.author && me.handle === c.author.handle); };
   var tbtn = function (id, icon, text, sub, off) { return '<button id="' + id + '" ' + (off ? 'disabled' : '') + ' class="flex w-full items-center gap-3 rounded-xl bg-neutral-800 p-3 text-left text-sm disabled:opacity-40"><span class="flex h-8 w-8 shrink-0 items-center justify-center text-lg">' + icon + '</span><span class="min-w-0 flex-1"><b>' + text + '</b>' + (sub ? '<span class="block text-xs text-neutral-400">' + sub + '</span>' : '') + '</span></button>'; };
   var tgroup = function (t) { return '<h3 class="mb-2 mt-4 text-xs font-bold uppercase text-neutral-400">' + t + '</h3>'; };
+  // all settings live in the Toolbox: video quality, language, notifications, messages, name, delete account
+  function settingsBox() {
+    var q = quality(), st = me ? me.settings : {};
+    var opt = function (attr, val, on, t, d) { return '<button ' + attr + '="' + val + '" role="radio" aria-checked="' + on + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (on ? 'bg-amber-400 text-black' : 'bg-neutral-800') + '"><span><b>' + t + '</b><span class="block text-xs ' + (on ? 'text-black/70' : 'text-neutral-400') + '">' + d + '</span></span><span>' + (on ? '✓' : '') + '</span></button>'; };
+    var sw = function (k, t, d) { return '<div class="flex items-center justify-between gap-3 rounded-xl bg-neutral-800 p-3"><div class="text-sm"><b>' + t + '</b><div class="text-xs text-neutral-400">' + d + '</div></div><button role="switch" data-sk="' + k + '" aria-checked="' + !!st[k] + '" aria-label="' + t + '" class="relative h-7 w-12 shrink-0 rounded-full ' + (st[k] ? 'bg-amber-400' : 'bg-neutral-600') + '"><span class="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ' + (st[k] ? 'left-[22px]' : 'left-0.5') + '"></span></button></div>'; };
+    return '<div class="flex flex-col gap-2"><div class="text-xs font-bold text-neutral-300">Qualité vidéo</div>' + opt('data-sq', 'auto', q === 'auto', 'Auto', '720p, 360p si le réseau ralentit') + opt('data-sq', 'saver', q === 'saver', 'Économiseur de données', 'Toujours 360p') +
+      '<div class="mt-2 text-xs font-bold text-neutral-300">Langue</div><select id="ts-lang" aria-label="Langue" class="' + inp + '"><option value="fr" selected>Français</option></select>' +
+      (me ? '<div class="mt-2 text-xs font-bold text-neutral-300">Compte</div><div class="rounded-xl bg-neutral-800 p-3 text-sm"><div class="text-xs text-neutral-400">E-mail</div>' + esc(me.email) + '</div>' +
+        '<form id="ts-name" class="flex gap-2" action="javascript:void(0)"><input id="ts-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Enregistrer</button></form>' +
+        sw('notifications', 'Notifications', 'Pastille de nouveaux messages') + sw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire') +
+        '<button id="tb-del2" class="mt-1 w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button>'
+        : '<div class="rounded-xl bg-neutral-800 p-3 text-sm text-neutral-300">Connectez-vous pour régler le compte, les notifications et les messages.</div>') + '</div>';
+  }
+  function bindSettings(again) {
+    modal.querySelectorAll('[data-sq]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('quality', b.dataset.sq); sessionStorage.removeItem('rend'); } catch (e) { /* ignore */ } shownId = null; again(); toast('Qualité : ' + (b.dataset.sq === 'saver' ? 'économiseur' : 'auto')); }; });
+    modal.querySelectorAll('[data-sk]').forEach(function (b) { b.onclick = function () { var k = b.dataset.sk, p = {}; p[k] = !me.settings[k]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (k === 'notifications') badge(); again(); }).catch(fail); }; });
+    var f = $('ts-name'); if (f) f.onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('ts-dn').value }).then(function (r) { me = r.user; paintEq(); toast('Nom enregistré'); }).catch(fail); };
+  }
   function toolbox() {
     var c = viewer || location.pathname === '/' ? cur() : null, mine = isMine(c), none = !c ? 'Ouvrez un clip' : '';
     var dl = c && (c.allowDownload !== false || mine);
@@ -435,7 +458,7 @@
       tgroup('Profil et compte') +
       tbtn('tb-prof', '👤', 'Profil', me ? '@' + esc(me.handle) : 'Se connecter pour voir son profil') +
       tbtn('tb-priv', '🔒', 'Confidentialité : ' + (me ? (me.settings.private_profile ? 'Privé' : 'Public') : 'Public / Privé'), me ? 'Toucher pour passer en ' + (me.settings.private_profile ? 'Public' : 'Privé') : 'Connexion requise') +
-      tbtn('tb-set', '⚙️', 'Paramètres', 'Qualité vidéo, compte, langue') +
+      tgroup('Paramètres') + settingsBox() +
       tbtn('tb-out', '🚪', me ? 'Déconnexion' : 'Connexion', me ? 'Quitter ce compte' : 'Se connecter') + '</div>');
     var on = function (id, fn) { var b = $(id); if (b) b.onclick = fn; };
 
@@ -474,7 +497,8 @@
       if (!me) return needLogin('Connectez-vous pour choisir la confidentialité de votre profil.');
       api('PATCH', '/api/me', { private_profile: !me.settings.private_profile }).then(function (r) { me = r.user; toolbox(); toast('Profil : ' + (me.settings.private_profile ? 'Privé' : 'Public')); }).catch(fail);
     });
-    on('tb-set', function () { nav('/settings'); });
+    bindSettings(toolbox);
+    on('tb-del2', deleteAccountModal);
     on('tb-out', function () { if (me) logout(); else nav('/login'); });
   }
   $('b-tools').onclick = toolbox;
@@ -807,10 +831,7 @@
     page.querySelectorAll('[data-pp]').forEach(function (b) { b.onclick = function () { api('PATCH', '/api/me', { private_profile: b.dataset.pp === 'true' }).then(function (r) { me = r.user; settingsPage(); }).catch(fail); }; });
     $('s-name').onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('s-dn').value }).then(function (r) { me = r.user; toast('Nom enregistré'); }).catch(fail); };
     $('s-out').onclick = logout;
-    $('s-del').onclick = function () {
-      openModal(head('Supprimer mon compte') + '<p class="mb-3 text-sm text-neutral-300">Cette action est définitive : votre compte, vos clips, commentaires et messages seront supprimés. Entrez votre mot de passe pour confirmer.</p><form id="d-f" class="flex flex-col gap-3" action="javascript:void(0)"><input id="d-p" type="password" autocomplete="current-password" placeholder="Mot de passe" class="' + inp + '"><div id="d-err" class="min-h-[18px] text-sm text-red-400"></div><button class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-extrabold text-white">Supprimer définitivement</button></form>');
-      $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
-    };
+    $('s-del').onclick = deleteAccountModal;
   }
 
   /* ================= router ================= */
