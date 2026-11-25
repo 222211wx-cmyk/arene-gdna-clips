@@ -319,8 +319,10 @@
   function paintEq() {
     var b = $('l-eq-t'); if (!b) return;
     var c = cur(), u = c && c.author ? c.author : me;
-    if (!u) { b.innerHTML = '<i data-lucide="user-round" class="h-5 w-5"></i>'; icons(); return; }
-    b.innerHTML = u.avatar ? '<img src="' + esc(u.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(u.name || u.handle || '?'));
+    if (!u) { b.innerHTML = '<i data-lucide="user-round" class="h-5 w-5"></i>'; $('l-eq-n').textContent = ''; $('l-eq-h').textContent = ''; icons(); return; }
+    var nm = u.name || u.handle || 'Arena Clips';
+    b.innerHTML = u.avatar ? '<img src="' + esc(u.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(nm));
+    $('l-eq-n').textContent = nm; $('l-eq-h').textContent = u.handle ? '@' + u.handle : '';
   }
   $('l-eq').onclick = function () { var c = cur(); if (c && c.author && c.author.handle && !(me && me.handle === c.author.handle)) nav('/u/' + encodeURIComponent(c.author.handle)); else nav('/profile'); };
   $('l-cap').onclick = function () {

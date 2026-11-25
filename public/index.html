@@ -89,7 +89,6 @@
   <aside id="l-rail" class="flex flex-col items-center gap-3">
     <button id="l-cap" aria-label="Titre et légende" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="type" class="h-5 w-5"></i></button>
     <button id="l-fav" aria-label="Favori" aria-pressed="false" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="star" class="h-5 w-5"></i></button>
-    <button id="l-eq" aria-label="Mon profil" class="rail-btn flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-xs font-extrabold text-black"><span id="l-eq-t">EQ</span></button>
     <button id="t-card" aria-label="Citizen Card" title="Citizen Card" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="id-card" class="h-5 w-5"></i></button>
     <button id="t-msg" aria-label="Message" title="Message" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="send" class="h-5 w-5"></i></button>
     <button id="t-ai" aria-label="Ask AI" title="Ask AI" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="sparkles" class="h-5 w-5 text-gold"></i></button>
@@ -98,7 +97,8 @@
   <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
   <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+116px)] pr-16">
     <div class="flex items-center gap-2">
-      <button id="follow" class="shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
+      <button id="l-eq" aria-label="Mon profil" class="flex min-w-0 items-center gap-2 text-left"><span id="l-eq-t" class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-sm font-extrabold text-black">EQ</span><span class="min-w-0 leading-tight"><span id="l-eq-n" class="block truncate text-[15px] font-bold txs"></span><span id="l-eq-h" class="block truncate text-xs text-white/75 txs"></span></span></button>
+      <button id="follow" class="ml-1 shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
     </div>
     <p class="mt-2 line-clamp-2 text-sm leading-snug txs"><b id="c-title" class="font-extrabold"></b> <span id="caption"></span></p>
   </section>
