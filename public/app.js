@@ -11,6 +11,19 @@
   var L = feedClips, idx = 0, shownId = null, viewer = false, vlist = null;
   var soundOn = false, loops = 0, userPaused = false, maxI = 0;
 
+  /* ================= stay signed in: the session token is also kept on this device and sent with every /api call ================= */
+  var TOK = 'sid';
+  var tokGet = function () { try { return localStorage.getItem(TOK) || ''; } catch (e) { return ''; } };
+  var tokSet = function (t) { try { if (t) localStorage.setItem(TOK, t); else localStorage.removeItem(TOK); } catch (e) { /* private mode */ } };
+  (function () {
+    var f = window.fetch;
+    window.fetch = function (u, o) {
+      var t = tokGet(), url = typeof u === 'string' ? u : (u && u.url) || '';
+      if (t && /^(\/(?!\/)|https?:\/\/[^/]*)\/?api\//.test(url.replace(location.origin, ''))) { o = o || {}; o.headers = Object.assign({}, o.headers instanceof Headers ? Object.fromEntries(o.headers) : o.headers, { 'x-sid': t }); }
+      return f.call(this, u, o);
+    };
+  })();
+
   /* ================= helpers ================= */
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var icons = function () { if (window.lucide) window.lucide.createIcons(); };
@@ -416,7 +429,7 @@
         $('d-chk').disabled = true; $('d-ok').textContent = '';
         api('POST', '/api/me/check-password', { password: pw }).then(function (r) { r.ok ? okEl(true, '✓ Mot de passe correct') : okEl(false, '✗ Mot de passe incorrect'); }).catch(function (e) { okEl(false, e.message); }).then(function () { $('d-chk').disabled = false; });
       };
-      $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
+      $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { tokSet(''); me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
   }
 
   /* ================= Toolbox (⋮ under Home): clip tools + profile / account tools ================= */
@@ -794,7 +807,7 @@
     if (focusId === 'bio') { $('ed-b').focus(); } else if (focusId === 'avatar') { try { $('ed-avf').click(); } catch (x) { /* user taps */ } }
   }
   function logout() {
-    api('POST', '/api/auth/logout').catch(function () { /* cookie cleared anyway */ }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/login', { replace: true }); });
+    api('POST', '/api/auth/logout').catch(function () { /* cookie cleared anyway */ }).then(function () { tokSet(''); me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/login', { replace: true }); });
   }
 
   /* ---- auth ---- */
@@ -830,7 +843,7 @@
         if (body.username.length < 3) { $('au-err').textContent = 'Le nom d’utilisateur doit faire 3 caractères minimum'; $('au-u').focus(); return; } }
       if (body.password.length < 8) { $('au-err').textContent = 'Le mot de passe doit faire 8 caractères minimum'; return; }
       $('au-go').disabled = true;
-      api('POST', '/api/auth/' + kind, body).then(function (r) { me = r.user; return Promise.all([refreshMe(), reloadFeed()]); }).then(function () { nav(next || '/profile', { replace: true }); })
+      api('POST', '/api/auth/' + kind, body).then(function (r) { tokSet(r.token); me = r.user; return Promise.all([refreshMe(), reloadFeed()]); }).then(function () { nav(next || '/profile', { replace: true }); })
         .catch(function (err) { $('au-err').textContent = err.message; $('au-go').disabled = false; });
     };
   }
