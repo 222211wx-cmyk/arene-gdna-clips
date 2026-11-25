@@ -565,6 +565,13 @@
   }
   $('up-open').onclick = openUpload;
   $('up-close').onclick = closeOverlay;
+  // Retour: from the edit step back to the file picker (gallery); from the picker, close the sheet
+  $('up-back').onclick = function () {
+    if ($('st-2').hidden) return closeOverlay();
+    try { $('st-prev').pause(); } catch (e) { /* ignore */ }
+    $('st-2').hidden = true; $('st-1').hidden = false; $('up-title').textContent = 'Nouveau clip'; $('up-file').value = '';
+    $('up-result').innerHTML = ''; $('up-label').textContent = ''; $('up-bar').style.width = '0';
+  };
 
   /* ================= pages ================= */
   var TAB = { '/': 'home', '/search': 'search', '/clips': 'clips', '/messages': 'messages' };
