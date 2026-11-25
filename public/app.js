@@ -540,7 +540,17 @@
     on('tb-del2', deleteAccountModal);
     on('tb-out', function () { if (me) logout(); else nav('/login'); });
   }
-  $('b-tools').onclick = toolbox;
+  // ⋮ is draggable: press and move it anywhere; the spot is remembered
+  (function () {
+    var b = $('b-tools'), moved = false, sx, sy, ox, oy, down = false;
+    function put(x, y) { x = Math.max(4, Math.min(innerWidth - 44, x)); y = Math.max(4, Math.min(innerHeight - 44, y)); b.style.left = x + 'px'; b.style.top = y + 'px'; }
+    try { var p = JSON.parse(localStorage.getItem('toolsPos') || 'null'); if (p) put(p.x * innerWidth, p.y * innerHeight); } catch (e) { /* ignore */ }
+    b.style.touchAction = 'none';
+    b.addEventListener('pointerdown', function (e) { down = true; moved = false; sx = e.clientX; sy = e.clientY; var r = b.getBoundingClientRect(); ox = r.left; oy = r.top; b.setPointerCapture(e.pointerId); });
+    b.addEventListener('pointermove', function (e) { if (!down) return; var dx = e.clientX - sx, dy = e.clientY - sy; if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return; moved = true; put(ox + dx, oy + dy); });
+    b.addEventListener('pointerup', function () { if (!down) return; down = false; if (moved) { var r = b.getBoundingClientRect(); try { localStorage.setItem('toolsPos', JSON.stringify({ x: r.left / innerWidth, y: r.top / innerHeight })); } catch (e) { /* ignore */ } } });
+    b.onclick = function () { if (moved) { moved = false; return; } toolbox(); };
+  })();
 
   // after a delete: drop the clip everywhere and go to the next one (or back to the feed when none is left)
   function afterDelete(c) {
