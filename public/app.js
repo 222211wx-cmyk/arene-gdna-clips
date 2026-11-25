@@ -221,9 +221,8 @@
     if (!c) { empty.classList.remove('hidden'); empty.classList.add('flex'); return; }
     empty.classList.add('hidden'); empty.classList.remove('flex');
     var name = (c.author && c.author.name) || 'Arena Clips', mine = me && c.author && me.handle === c.author.handle;
-    $('author').textContent = name; var av = c.author && c.author.avatar; $('avatar').innerHTML = av ? '<img src="' + esc(av) + '" alt="" class="h-full w-full rounded-full object-cover">' : esc(initials(name));
+    paintEq();
     $('c-title').textContent = titleOf(c); $('caption').textContent = capOf(c);
-    $('handle').textContent = '@' + ((c.author && c.author.handle) || '');
     var vw = c.viewer || {};
     $('r-like').classList.toggle('on', !!vw.liked); $('r-like').querySelector('[data-n]').textContent = c.likes || 0;
     $('r-save').classList.toggle('saved', !!vw.saved); $('r-save').querySelector('[data-n]').textContent = c.saves || 0;
@@ -314,15 +313,16 @@
     setFollowEverywhere(h, on); paint();
     api('PUT', '/api/clips/' + encodeURIComponent(c.id) + '/follow', { on: on }).then(function (r) { setFollowEverywhere(h, on, r.status); if (r.status === 'pending') toast('Demande de suivi envoyée'); paint(); }).catch(function (e) { setFollowEverywhere(h, !on); paint(); fail(e); });
   });
-  $('author-btn').onclick = function () { var c = cur(); if (c) nav('/u/' + encodeURIComponent(c.author.handle)); };
 
   /* ================= left rail: EQ avatar, Settings, Title/Caption, Favorite ================= */
+  // ONE profile button (ProfileButton): the clip author's avatar, same row as the 👁️ counter; tap opens that profile
   function paintEq() {
     var b = $('l-eq-t'); if (!b) return;
-    if (!me) { b.innerHTML = '<i data-lucide="user-round" class="h-5 w-5"></i>'; icons(); return; }
-    b.innerHTML = me.avatar ? '<img src="' + esc(me.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(me.name));
+    var c = cur(), u = c && c.author ? c.author : me;
+    if (!u) { b.innerHTML = '<i data-lucide="user-round" class="h-5 w-5"></i>'; icons(); return; }
+    b.innerHTML = u.avatar ? '<img src="' + esc(u.avatar) + '" alt="" class="h-full w-full object-cover">' : esc(initials(u.name || u.handle || '?'));
   }
-  $('l-eq').onclick = function () { nav('/profile'); };
+  $('l-eq').onclick = function () { var c = cur(); if (c && c.author && c.author.handle && !(me && me.handle === c.author.handle)) nav('/u/' + encodeURIComponent(c.author.handle)); else nav('/profile'); };
   $('l-cap').onclick = function () {
     var c = cur(); if (!c) return;
     var t = titleOf(c), d = capOf(c), cm = cleanTitle(c.comment);
