@@ -411,6 +411,7 @@ social.patch('/me', needUser, wrap(async (req, res) => {
   if (r.error) return res.status(409).json({ error: 'Ce nom d’utilisateur est déjà pris', field: 'username' });
   res.json({ user: await presentUser(r.user) });
 }));
+social.post('/me/check-password', needUser, throttle, wrap(async (req, res) => res.json({ ok: await db.passwordOk(req.user.id, req.body?.password) })));
 social.delete('/me', needUser, wrap(async (req, res) => {
   const keys = await db.deleteAccount(req.user.id, String(req.body?.password || ''));
   if (!keys) return res.status(403).json({ error: 'Mot de passe incorrect' });

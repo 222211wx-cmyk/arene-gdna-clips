@@ -324,6 +324,10 @@ export async function setFavorite(userId, clipId, on) {
   return { on };
 }
 // Deletes the account and everything it owns; returns the R2 keys to remove.
+export async function passwordOk(userId, password) {
+  const { rows } = await pool.query('SELECT password_hash FROM clips.users WHERE id = $1', [userId]);
+  return !!rows[0] && checkPw(String(password || ''), rows[0].password_hash);
+}
 export async function deleteAccount(userId, password) {
   const { rows } = await pool.query('SELECT password_hash FROM clips.users WHERE id = $1', [userId]);
   if (!rows[0] || !checkPw(password, rows[0].password_hash)) return null;

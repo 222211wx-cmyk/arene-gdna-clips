@@ -391,7 +391,15 @@
 
 
   function deleteAccountModal() {
-      openModal(head('Supprimer mon compte') + '<p class="mb-3 text-sm text-neutral-300">Cette action est définitive : votre compte, vos clips, commentaires et messages seront supprimés. Entrez votre mot de passe pour confirmer.</p><form id="d-f" class="flex flex-col gap-3" action="javascript:void(0)"><input id="d-p" type="password" autocomplete="current-password" placeholder="Mot de passe" class="' + inp + '"><div id="d-err" class="min-h-[18px] text-sm text-red-400"></div><button class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-extrabold text-white">Supprimer définitivement</button></form>');
+      openModal(head('Supprimer mon compte') + '<p class="mb-3 text-sm text-neutral-300">Cette action est définitive : votre compte, vos clips, commentaires et messages seront supprimés. Entrez votre mot de passe pour confirmer.</p><form id="d-f" class="flex flex-col gap-3" action="javascript:void(0)"><input id="d-p" type="password" autocomplete="current-password" placeholder="Mot de passe" class="' + inp + '"><div class="flex items-center gap-2"><button type="button" id="d-eye" aria-label="Afficher le mot de passe" class="flex h-10 items-center gap-1.5 rounded-full border border-neutral-600 bg-neutral-800 px-4 text-sm font-bold"><i data-lucide="eye" class="h-5 w-5"></i><span>Afficher</span></button><button type="button" id="d-chk" class="h-10 rounded-full border border-neutral-600 bg-neutral-800 px-4 text-sm font-bold">Vérifier</button><span id="d-ok" role="status" class="min-w-0 flex-1 text-sm font-bold"></span></div><div id="d-err" class="min-h-[18px] text-sm text-red-400"></div><button class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-extrabold text-white">Supprimer définitivement</button></form>');
+      var okEl = function (good, t) { var o = $('d-ok'); o.className = 'min-w-0 flex-1 text-sm font-bold ' + (good ? 'text-green-400' : 'text-red-400'); o.textContent = t; };
+      $('d-p').oninput = function () { $('d-ok').textContent = ''; $('d-err').textContent = ''; };
+      $('d-eye').onclick = function () { var show = $('d-p').type === 'password'; $('d-p').type = show ? 'text' : 'password'; $('d-eye').innerHTML = '<i data-lucide="' + (show ? 'eye-off' : 'eye') + '" class="h-5 w-5"></i><span>' + (show ? 'Masquer' : 'Afficher') + '</span>'; $('d-eye').setAttribute('aria-label', show ? 'Masquer le mot de passe' : 'Afficher le mot de passe'); icons(); };
+      $('d-chk').onclick = function () {
+        var pw = $('d-p').value; if (!pw) return okEl(false, 'Saisissez le mot de passe');
+        $('d-chk').disabled = true; $('d-ok').textContent = '';
+        api('POST', '/api/me/check-password', { password: pw }).then(function (r) { r.ok ? okEl(true, '✓ Mot de passe correct') : okEl(false, '✗ Mot de passe incorrect'); }).catch(function (e) { okEl(false, e.message); }).then(function () { $('d-chk').disabled = false; });
+      };
       $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
   }
 
