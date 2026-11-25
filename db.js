@@ -122,6 +122,9 @@ ALTER TABLE clips.follows ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
 ALTER TABLE clips.media ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS allow_download boolean NOT NULL DEFAULT true;
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS trim_start real;
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS trim_end real;
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS accessories text NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS clips.reports (
   id bigserial PRIMARY KEY,
   clip_id text NOT NULL REFERENCES clips.clips(id) ON DELETE CASCADE,
@@ -149,7 +152,7 @@ export async function migrate() {
 export const getDefaultUserId = () => defaultUserId;
 
 const COLS = `c.id, c.key, c.poster_key, c.v720_key, c.v360_key, c.title, c.description, c.comment, c.music_id, c.music_name, c.music_artist,
-  c.enhancement, c.privacy, c.views, c.allow_download, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
+  c.enhancement, c.privacy, c.views, c.allow_download, c.trim_start, c.trim_end, c.accessories, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
   (SELECT count(*)::int FROM clips.likes l WHERE l.clip_id = c.id) AS likes,
   (SELECT count(*)::int FROM clips.comments m WHERE m.clip_id = c.id) AS comments,
   (SELECT count(*)::int FROM clips.saves s WHERE s.clip_id = c.id) AS saves,
@@ -169,6 +172,19 @@ export async function clipVisible(id, viewerId) {
 }
 export async function setClipPrivacy(userId, clipId, privacy) {
   const { rowCount } = await pool.query('UPDATE clips.clips SET privacy = $3 WHERE id = $1 AND user_id = $2', [clipId, userId, privacy]);
+  return rowCount > 0;
+}
+// Owner edit: title, description, non-destructive trim (seconds) and emoji accessories (space-separated).
+export async function editClip(userId, clipId, f) {
+  const sets = [], args = [clipId, userId];
+  const add = (col, val) => { args.push(val); sets.push(`${col} = $${args.length}`); };
+  if ('title' in f) add('title', f.title);
+  if ('description' in f) add('description', f.description);
+  if ('trimStart' in f) add('trim_start', f.trimStart);
+  if ('trimEnd' in f) add('trim_end', f.trimEnd);
+  if ('accessories' in f) add('accessories', f.accessories);
+  if (!sets.length) return false;
+  const { rowCount } = await pool.query(`UPDATE clips.clips SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2`, args);
   return rowCount > 0;
 }
 export async function setClipDownload(userId, clipId, allow) {

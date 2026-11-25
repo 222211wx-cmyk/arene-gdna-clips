@@ -9,7 +9,7 @@
   var me = null, unread = 0;
   var feedClips = [], seen = {}, feedNext = null, feedI = 0, busy = false;
   var L = feedClips, idx = 0, shownId = null, viewer = false, vlist = null;
-  var soundOn = (function () { try { return localStorage.getItem('sound') === '1'; } catch (e) { return false; } })(), loops = 0, userPaused = false, maxI = 0;
+  var soundOn = (function () { try { return sessionStorage.getItem('sound') !== '0'; } catch (e) { return true; } })(), loops = 0, userPaused = false, maxI = 0;
 
   /* ================= stay signed in: the session token is also kept on this device and sent with every /api call ================= */
   var TOK = 'sid';
@@ -155,13 +155,16 @@
   function canRun() { return feedVisible() && !userPaused && $('replay').hidden; }
   document.addEventListener('visibilitychange', function () { if (document.hidden) v.pause(); else if (canRun()) tryPlay(); });
   function resetLoops() { loops = 0; $('replay').hidden = true; }
-  function tryPlay() { var p = v.play(); if (p && p.catch) p.catch(function () { if (!v.muted) { v.muted = true; soundOn = false; paintSound(); v.play().catch(function () { /* user taps to start */ }); } }); }
+  function tryPlay() { var p = v.play(); if (p && p.catch) p.catch(function () { if (!v.muted) { v.muted = true; v.play().catch(function () { /* user taps to start */ }); } }); }   // browser blocked sound-on autoplay: play silently, icon stays open, first touch unmutes
   // loopCount: every `ended` is one finished play; after the 3rd one the chain moves to the next clip
+  function startAt() { var c = cur(); return (c && c.trimStart) || 0; }
+  // Couper is non-destructive: playback stays inside [trimStart, trimEnd]
+  function onTrim() { if (this !== v || !shownId) return; var c = cur(); if (c && c.trimEnd && this.currentTime >= c.trimEnd) onEnded.call(this); }
   function onEnded() {
     if (this !== v || !shownId) return;
-    if (ov) { v.currentTime = 0; tryPlay(); return; }          // a sheet is open over this clip: keep it here
+    if (ov) { v.currentTime = startAt(); tryPlay(); return; }          // a sheet is open over this clip: keep it here
     loops++;
-    if (loops < 3) { v.currentTime = 0; tryPlay(); return; }
+    if (loops < 3) { v.currentTime = startAt(); tryPlay(); return; }
     if (L.length > 1) jumpTo((idx + 1) % L.length, 1); else $('replay').hidden = false;
   }
   function onTap() {
@@ -170,7 +173,7 @@
     if (v.muted && !v.paused) { soundOn = true; v.muted = false; paintSound(); return; }   // first tap: sound on
     if (v.paused) { userPaused = false; tryPlay(); } else { userPaused = true; v.pause(); }
   }
-  [v, buf].forEach(function (el) { el.addEventListener('waiting', onWaiting); el.addEventListener('ended', onEnded); el.addEventListener('click', onTap); });
+  [v, buf].forEach(function (el) { el.addEventListener('waiting', onWaiting); el.addEventListener('ended', onEnded); el.addEventListener('timeupdate', onTrim); el.addEventListener('click', onTap); });
   // IntersectionObserver: the clip plays only while at least half of it is on screen
   var io = 'IntersectionObserver' in window ? new IntersectionObserver(function (es) {
     es.forEach(function (en) {
@@ -184,8 +187,11 @@
   // volume button: one tap = sound on (open), next tap = mute; the choice is kept until the user changes it
   var vol = 1;
   function applyVol() { [v, buf, $('pc-v')].forEach(function (el) { try { el.volume = 1; } catch (e) { /* iOS: read-only */ } }); }
-  function setSound(on) { soundOn = on; try { localStorage.setItem('sound', on ? '1' : '0'); } catch (e) { /* ignore */ } v.muted = !on; buf.muted = !on; applyVol(); paintSound(); if (on) tryPlay(); }
-  $('r-snd').onclick = function () { setSound(!soundOn); toast(soundOn ? 'Son activé' : 'Son coupé'); };
+  function setSound(on) { soundOn = on; try { sessionStorage.setItem('sound', on ? '1' : '0'); } catch (e) { /* ignore */ } v.muted = !on; buf.muted = !on; applyVol(); paintSound(); if (on) tryPlay(); }
+  // open on load: only the user's tap on the button closes it; a blocked autoplay is un-muted by the first touch anywhere
+  function unlockSound(e) { if (soundOn && v.muted && !(e.target.closest && e.target.closest('#r-snd'))) { v.muted = false; buf.muted = false; applyVol(); } }
+  document.addEventListener('pointerdown', unlockSound, true);
+  $('r-snd').onclick = function () { if (soundOn && v.muted) { v.muted = false; applyVol(); toast('Son activé'); return; } setSound(!soundOn); toast(soundOn ? 'Son activé' : 'Son coupé'); };
   applyVol(); paintSound();
 
   function show(dir) {
@@ -196,11 +202,11 @@
       var old = v; v = buf; buf = old;
       if (io) { io.unobserve(buf); io.observe(v); }
       v.classList.remove('invisible'); buf.classList.add('invisible'); buf.pause();
-      v.muted = !soundOn; try { v.currentTime = 0; } catch (e) { /* ignore */ }
+      v.muted = !soundOn; try { v.currentTime = startAt(); } catch (e) { /* ignore */ }
       poster.classList.add('hidden');
     } else {
       if (c.poster) { poster.src = c.poster; poster.classList.remove('hidden'); v.poster = c.poster; } else { poster.classList.add('hidden'); v.removeAttribute('poster'); }
-      v.muted = !soundOn; v.dataset.id = c.id; v.src = srcOf(c); v.load();
+      v.muted = !soundOn; v.dataset.id = c.id; v.src = srcOf(c); v.load(); if (c.trimStart) v.addEventListener('loadedmetadata', function h() { v.removeEventListener('loadedmetadata', h); try { v.currentTime = c.trimStart; } catch (e) { /* ignore */ } });
       v.addEventListener('playing', function h() { v.removeEventListener('playing', h); poster.classList.add('hidden'); });
     }
     tryPlay();
@@ -225,7 +231,7 @@
     $('r-comment').querySelector('[data-n]').textContent = c.comments || 0;
     $('r-share').querySelector('[data-n]').textContent = c.shares || 0;
     var f = $('follow'); f.hidden = !!mine; f.textContent = vw.following ? 'Abonné ✓' : vw.requested ? 'Demandé' : 'Suivre'; f.classList.toggle('bg-white', !!vw.following); f.classList.toggle('text-black', !!vw.following);
-    $('views-n').textContent = fmtN(c.views || 0);
+    $('views-n').textContent = fmtN(c.views || 0); $('acc-ov').textContent = (c.accessories || []).join(' ');
     $('t-msg').disabled = !!mine; $('t-msg').classList.toggle('opacity-40', !!mine);
   }
   var fmtN = function (n) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace('.0', '') + ' M' : n >= 1e4 ? Math.round(n / 1e3) + ' k' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.0', '') + ' k' : String(n); };
@@ -485,6 +491,10 @@
     var dl = c && (c.allowDownload !== false || mine);
     openModal(head('Boîte à outils') + '<div class="flex flex-col gap-2">' + '<h3 class="mb-0 text-xs font-bold uppercase text-neutral-400">Outils du clip</h3>' +
       tbtn('tb-del', '🗑️', 'Supprimer', c ? (mine ? 'Supprimer ce clip' : 'Réservé au propriétaire') : none, !c || !mine) +
+      tbtn('tb-cut', '✂️', 'Couper', c ? (mine ? 'Garder seulement un passage' : 'Réservé au propriétaire') : none, !c || !mine) +
+      tbtn('tb-copy', '📋', 'Copier', none || 'Copier le lien du clip', !c) +
+      tbtn('tb-acc', '✨', 'Accessoires', c ? (mine ? 'Ajouter des emojis sur le clip' : 'Réservé au propriétaire') : none, !c || !mine) +
+      tbtn('tb-desc', '📝', 'Description', c ? (mine ? 'Modifier le titre et la description' : 'Réservé au propriétaire') : none, !c || !mine) +
       tbtn('tb-zoom', '🔍', 'Zoom', none || '100 % → 150 % → 200 %', !c) +
       tbtn('tb-pc', '🖥️', 'Mode PC / Petit écran', none || 'Fenêtre fixe 800×450', !c) +
       tbtn('tb-vol', soundOn ? '🔊' : '🔇', 'Volume', soundOn ? 'Son activé : toucher pour couper' : 'Son coupé : toucher pour activer', !c) +
@@ -506,6 +516,27 @@
         $('dl-yes').disabled = true;
         api('DELETE', '/api/clips/' + encodeURIComponent(c.id)).then(function () { afterDelete(c); toast('Clip supprimé'); }).catch(function (e) { $('dl-yes').disabled = false; fail(e); });
       };
+    });
+    function edit(body) { return api('PATCH', '/api/clips/' + encodeURIComponent(c.id) + '/edit', body); }
+    on('tb-copy', function () { copyText(location.origin + '/c/' + encodeURIComponent(c.id)).then(function () { closeOverlay(); toast('Lien copié'); }); });
+    on('tb-cut', function () {
+      var dur = v.duration || 0, a = c.trimStart || 0, b = c.trimEnd || dur;
+      openModal(head('Couper') + '<p class="mb-3 text-sm text-neutral-300">Le clip ne joue que ce passage (secondes). L’original reste intact.</p><div class="mb-3 flex gap-2"><label class="flex-1 text-xs text-neutral-400">Début<input id="ct-a" type="number" min="0" step="0.1" value="' + a.toFixed(1) + '" class="' + field + '"></label><label class="flex-1 text-xs text-neutral-400">Fin<input id="ct-b" type="number" min="0" step="0.1" value="' + (b ? b.toFixed(1) : '') + '" class="' + field + '"></label></div><div class="flex gap-2"><button id="ct-ok" class="' + btn + ' flex-1">Enregistrer</button><button id="ct-rm" class="' + btn2 + ' flex-1">Retirer la coupe</button></div>');
+      function save(ts, te) { edit({ trimStart: ts, trimEnd: te }).then(function () { c.trimStart = ts; c.trimEnd = te; closeOverlay(); try { v.currentTime = ts || 0; } catch (e) { /* ignore */ } toast('Coupe enregistrée'); }).catch(fail); }
+      $('ct-ok').onclick = function () { var ts = parseFloat($('ct-a').value), te = parseFloat($('ct-b').value); if (!(ts >= 0) || !(te > ts)) return toast('La fin doit suivre le début'); save(ts, te); };
+      $('ct-rm').onclick = function () { save(null, null); };
+    });
+    on('tb-acc', function () {
+      var all = ['😎', '🎩', '👑', '🕶️', '❤️', '🔥', '⭐', '🎉', '💎', '🏆', '🎵', '🌟'], sel = (c.accessories || []).slice();
+      function draw() { return all.map(function (e) { var on = sel.indexOf(e) >= 0; return '<button data-e="' + e + '" aria-pressed="' + on + '" class="h-14 rounded-xl text-3xl ' + (on ? 'bg-amber-400' : 'bg-neutral-800') + '">' + e + '</button>'; }).join(''); }
+      openModal(head('Accessoires') + '<p class="mb-3 text-sm text-neutral-300">Jusqu’à 6 emojis affichés sur le clip.</p><div id="ac-g" class="mb-3 grid grid-cols-4 gap-2">' + draw() + '</div><button id="ac-ok" class="' + btn + ' w-full">Enregistrer</button>');
+      function bind() { $('ac-g').querySelectorAll('[data-e]').forEach(function (b) { b.onclick = function () { var e = b.dataset.e, i = sel.indexOf(e); if (i >= 0) sel.splice(i, 1); else if (sel.length < 6) sel.push(e); else toast('6 maximum'); $('ac-g').innerHTML = draw(); bind(); }; }); }
+      bind();
+      $('ac-ok').onclick = function () { edit({ accessories: sel }).then(function () { c.accessories = sel; closeOverlay(); paint(); toast('Accessoires enregistrés'); }).catch(fail); };
+    });
+    on('tb-desc', function () {
+      openModal(head('Description') + '<form id="ds-f" class="flex flex-col gap-2" action="javascript:void(0)"><input id="ds-t" maxlength="120" value="' + esc(c.title || '') + '" aria-label="Titre" class="' + field + '"><textarea id="ds-d" rows="5" maxlength="2000" aria-label="Description" class="' + field + '">' + esc(c.description || '') + '</textarea><button class="' + btn + '">Enregistrer</button></form>');
+      $('ds-f').onsubmit = function (e) { e.preventDefault(); var t = $('ds-t').value.trim(), d = $('ds-d').value; if (!t) return toast('Le titre est requis'); edit({ title: t, description: d }).then(function () { c.title = t; c.description = d.trim(); closeOverlay(); paint(); toast('Description enregistrée'); }).catch(fail); };
     });
     on('tb-zoom', function () { closeOverlay(); setTimeout(function () { $('zoom-bar').hidden = false; zoomSet(1.5); }, 60); });
     on('tb-pc', function () { openPc(c); });
@@ -532,20 +563,17 @@
     on('tb-del2', deleteAccountModal);
     on('tb-out', function () { if (me) logout(); else nav('/login'); });
   }
-  // ⋮ is draggable: press and move it anywhere; the spot is remembered (as a fraction of the app column)
+  // ⋮ sits DIRECTLY ABOVE the T (Titre) button, same left edge, same size; follows T if the layout moves
   (function () {
-    var b = $('b-tools'), moved = false, sx, sy, ox, oy, down = false;
-    function par() { return (b.offsetParent || document.body).getBoundingClientRect(); }
-    function put(x, y) { var P = par(); x = Math.max(4, Math.min(P.width - 44, x)); y = Math.max(4, Math.min(P.height - 44, y)); b.style.left = x + 'px'; b.style.top = y + 'px'; }
-    try { var sp = JSON.parse(localStorage.getItem('toolsPos') || 'null'); if (sp) put(sp.x * par().width, sp.y * par().height); } catch (e) { /* ignore */ }
-    // default spot: exactly 2px under Home, same left edge (follows Home if the layout moves)
-    function dock() { if (localStorage.getItem('toolsPos') || down) return; var h = $('b-home').getBoundingClientRect(), P = par(); if (!h.width) return; b.style.left = Math.round(h.left - P.left) + 'px'; b.style.top = Math.round(h.bottom + 2 - P.top) + 'px'; }
-    dock(); addEventListener('resize', dock); setInterval(dock, 600);
-    b.style.touchAction = 'none';
-    b.addEventListener('pointerdown', function (e) { down = true; moved = false; sx = e.clientX; sy = e.clientY; var r = b.getBoundingClientRect(), P = par(); ox = r.left - P.left; oy = r.top - P.top; b.setPointerCapture(e.pointerId); });
-    b.addEventListener('pointermove', function (e) { if (!down) return; var dx = e.clientX - sx, dy = e.clientY - sy; if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return; moved = true; put(ox + dx, oy + dy); });
-    b.addEventListener('pointerup', function () { if (!down) return; down = false; if (moved) { var r = b.getBoundingClientRect(), P = par(); try { localStorage.setItem('toolsPos', JSON.stringify({ x: (r.left - P.left) / P.width, y: (r.top - P.top) / P.height })); } catch (e) { /* ignore */ } } });
-    b.onclick = function () { if (moved) { moved = false; return; } toolbox(); };
+    var b = $('b-tools');
+    try { localStorage.removeItem('toolsPos'); } catch (e) { /* old drag position, no longer used */ }
+    function dock() {
+      var t = $('l-cap').getBoundingClientRect(), P = (b.offsetParent || document.body).getBoundingClientRect();
+      if (!t.width) { b.style.left = ''; b.style.top = ''; return; }   // T hidden on this page: CSS spot under Home
+      b.style.left = Math.round(t.left - P.left) + 'px'; b.style.top = Math.round(t.top - P.top - 40 - 8) + 'px';
+    }
+    dock(); addEventListener('resize', dock); setInterval(dock, 500);
+    b.onclick = toolbox;
   })();
 
   // after a delete: drop the clip everywhere and go to the next one (or back to the feed when none is left)
