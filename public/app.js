@@ -9,7 +9,7 @@
   var me = null, unread = 0;
   var feedClips = [], seen = {}, feedNext = null, feedI = 0, busy = false;
   var L = feedClips, idx = 0, shownId = null, viewer = false, vlist = null;
-  var soundOn = false, loops = 0, userPaused = false, maxI = 0;
+  var soundOn = (function () { try { return localStorage.getItem('sound') === '1'; } catch (e) { return false; } })(), loops = 0, userPaused = false, maxI = 0;
 
   /* ================= stay signed in: the session token is also kept on this device and sent with every /api call ================= */
   var TOK = 'sid';
@@ -181,23 +181,12 @@
   if (io) io.observe(v);
   $('replay').onclick = function () { resetLoops(); userPaused = false; v.currentTime = 0; tryPlay(); };
   function paintSound() { $('r-snd').querySelector('i,svg').outerHTML = '<i data-lucide="' + (soundOn ? 'volume-2' : 'volume-x') + '" class="h-5 w-5"></i>'; icons(); }
-  // volume button opens a small panel: mute / unmute + level slider; the choice is kept (localStorage) until the user changes it
-  var vol = (function () { try { var x = parseFloat(localStorage.getItem('vol')); return x >= 0 && x <= 1 ? x : 1; } catch (e) { return 1; } })();
-  function applyVol() { [v, buf, $('pc-v')].forEach(function (el) { try { el.volume = vol; } catch (e) { /* iOS: read-only */ } }); }
-  function paintVol() {
-    $('vol-range').value = Math.round(vol * 100); $('vol-n').textContent = soundOn ? Math.round(vol * 100) + '%' : 'Muet';
-    $('vol-mute').innerHTML = '<i data-lucide="' + (soundOn ? 'volume-2' : 'volume-x') + '" class="h-5 w-5"></i>'; icons();
-  }
-  var volTimer;
-  function volOpen() { $('vol-pop').hidden = false; paintVol(); clearTimeout(volTimer); volTimer = setTimeout(function () { $('vol-pop').hidden = true; }, 6000); }
-  function volKeep() { clearTimeout(volTimer); volTimer = setTimeout(function () { $('vol-pop').hidden = true; }, 6000); }
-  $('r-snd').onclick = function () { if ($('vol-pop').hidden) volOpen(); else $('vol-pop').hidden = true; };
-  $('vol-mute').onclick = function () { soundOn = !soundOn; if (soundOn && vol === 0) vol = 0.5; v.muted = !soundOn; buf.muted = !soundOn; applyVol(); paintSound(); paintVol(); volKeep(); };
-  $('vol-range').oninput = function () {
-    vol = this.value / 100; try { localStorage.setItem('vol', String(vol)); } catch (e) { /* ignore */ }
-    soundOn = vol > 0; v.muted = !soundOn; buf.muted = !soundOn; applyVol(); paintSound(); paintVol(); volKeep();
-  };
-  applyVol();
+  // volume button: one tap = sound on (open), next tap = mute; the choice is kept until the user changes it
+  var vol = 1;
+  function applyVol() { [v, buf, $('pc-v')].forEach(function (el) { try { el.volume = 1; } catch (e) { /* iOS: read-only */ } }); }
+  function setSound(on) { soundOn = on; try { localStorage.setItem('sound', on ? '1' : '0'); } catch (e) { /* ignore */ } v.muted = !on; buf.muted = !on; applyVol(); paintSound(); if (on) tryPlay(); }
+  $('r-snd').onclick = function () { setSound(!soundOn); toast(soundOn ? 'Son activé' : 'Son coupé'); };
+  applyVol(); paintSound();
 
   function show(dir) {
     var c = cur(); if (!c) { v.removeAttribute('src'); v.load(); poster.classList.add('hidden'); shownId = null; $('views-n').textContent = '0'; return paint(); }
@@ -515,7 +504,7 @@
       try { var r = f.call(el); if (r && r.catch) r.catch(function () { toast('Plein écran refusé'); }); } catch (e) { toast('Plein écran refusé'); }
       el.controls = true; closeOverlay();
     });
-    on('tb-vol', function () { soundOn = !soundOn; v.muted = !soundOn; buf.muted = !soundOn; applyVol(); paintSound(); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
+    on('tb-vol', function () { setSound(!soundOn); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
     on('tb-dl', function () { var a = document.createElement('a'); a.href = '/api/clips/' + encodeURIComponent(c.id) + '/download'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); toast('Téléchargement…'); });
     on('tb-dlset', guard(function () {
       var allow = !(c.allowDownload !== false);
