@@ -180,7 +180,7 @@ const present = async (row, vs = {}) => ({
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
   author: { handle: row.handle, name: row.display_name, avatar: row.avatar_key && configured ? await mediaUrl(row.avatar_key) : null },
   tags: row.tags ? row.tags.split(' ') : [],
-  likes: row.likes, comments: row.comments, saves: row.saves, shares: row.shares, views: row.views, allowDownload: row.allow_download !== false, createdAt: row.created_at,
+  likes: row.likes, comments: row.comments, saves: row.saves, shares: row.shares, views: row.views, allowDownload: row.allow_download !== false, trimStart: row.trim_start, trimEnd: row.trim_end, accessories: row.accessories ? row.accessories.split(' ') : [], overlayText: row.overlay_text || '', filter: row.fx_filter || '', watermark: !!row.watermark, createdAt: row.created_at,
   viewer: { liked: !!vs.liked, saved: !!vs.saved, following: !!vs.following, requested: !!vs.requested, favorited: !!vs.favorited },
 });
 // ---- accounts: session cookie `sid` -> users row. Reads work anonymously; every write needs a login. ----
@@ -367,6 +367,20 @@ social.patch('/clips/:id/download', needUser, wrap(async (req, res) => {
   if (!clipId(req.params.id) || typeof req.body?.allow !== 'boolean') return res.status(400).json({ error: 'requête invalide' });
   if (!(await db.setClipDownload(req.user.id, req.params.id, req.body.allow))) return res.status(404).json({ error: 'clip introuvable' });
   res.json({ ok: true, allow: req.body.allow });
+}));
+social.patch('/clips/:id/edit', needUser, wrap(async (req, res) => {
+  if (!clipId(req.params.id)) return res.status(400).json({ error: 'requête invalide' });
+  const b = req.body || {}, f = {};
+  if ('title' in b) { if (typeof b.title !== 'string' || !b.title.trim() || b.title.length > 120) return res.status(400).json({ error: 'titre invalide' }); f.title = b.title.trim(); }
+  if ('description' in b) { if (typeof b.description !== 'string' || b.description.length > 2000) return res.status(400).json({ error: 'description invalide' }); f.description = b.description.trim(); }
+  for (const k of ['trimStart', 'trimEnd']) if (k in b) { if (b[k] !== null && !(Number.isFinite(b[k]) && b[k] >= 0)) return res.status(400).json({ error: 'coupe invalide' }); f[k] = b[k]; }
+  if ('trimStart' in f && 'trimEnd' in f && f.trimStart !== null && f.trimEnd !== null && f.trimEnd <= f.trimStart) return res.status(400).json({ error: 'la fin doit suivre le début' });
+  if ('accessories' in b) { if (!Array.isArray(b.accessories) || b.accessories.length > 6 || b.accessories.some((x) => typeof x !== 'string' || !x || x.length > 8 || /\s/.test(x))) return res.status(400).json({ error: 'accessoires invalides' }); f.accessories = b.accessories.join(' '); }
+  if ('overlayText' in b) { if (typeof b.overlayText !== 'string' || b.overlayText.length > 80) return res.status(400).json({ error: 'texte invalide' }); f.overlayText = b.overlayText.trim(); }
+  if ('filter' in b) { if (!['', 'bw', 'sepia', 'warm', 'cool', 'contrast', 'soft'].includes(b.filter)) return res.status(400).json({ error: 'filtre invalide' }); f.filter = b.filter; }
+  if ('watermark' in b) { if (typeof b.watermark !== 'boolean') return res.status(400).json({ error: 'watermark invalide' }); f.watermark = b.watermark; }
+  if (!(await db.editClip(req.user.id, req.params.id, f))) return res.status(404).json({ error: 'clip introuvable' });
+  res.json({ ok: true });
 }));
 social.delete('/clips/:id', needUser, wrap(async (req, res) => {
   if (!clipId(req.params.id)) return res.status(400).json({ error: 'requête invalide' });
