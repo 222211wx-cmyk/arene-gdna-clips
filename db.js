@@ -121,6 +121,14 @@ CREATE TABLE IF NOT EXISTS clips.favorites (
 ALTER TABLE clips.follows ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'accepted';
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
 ALTER TABLE clips.media ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS allow_download boolean NOT NULL DEFAULT true;
+CREATE TABLE IF NOT EXISTS clips.reports (
+  id bigserial PRIMARY KEY,
+  clip_id text NOT NULL REFERENCES clips.clips(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES clips.users(id) ON DELETE SET NULL,
+  reason text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE OR REPLACE FUNCTION clips.norm(t text) RETURNS text LANGUAGE sql IMMUTABLE AS
 $$ SELECT translate(lower(coalesce(t,'')), 'àáâãäåçèéêëìíîïñòóôõöùúûüýÿœ', 'aaaaaaceeeeiiiinooooouuuuyyo') $$;
 `;
@@ -141,7 +149,7 @@ export async function migrate() {
 export const getDefaultUserId = () => defaultUserId;
 
 const COLS = `c.id, c.key, c.poster_key, c.v720_key, c.v360_key, c.title, c.description, c.comment, c.music_id, c.music_name, c.music_artist,
-  c.enhancement, c.privacy, c.views, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
+  c.enhancement, c.privacy, c.views, c.allow_download, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
   (SELECT count(*)::int FROM clips.likes l WHERE l.clip_id = c.id) AS likes,
   (SELECT count(*)::int FROM clips.comments m WHERE m.clip_id = c.id) AS comments,
   (SELECT count(*)::int FROM clips.saves s WHERE s.clip_id = c.id) AS saves,
@@ -162,6 +170,24 @@ export async function clipVisible(id, viewerId) {
 export async function setClipPrivacy(userId, clipId, privacy) {
   const { rowCount } = await pool.query('UPDATE clips.clips SET privacy = $3 WHERE id = $1 AND user_id = $2', [clipId, userId, privacy]);
   return rowCount > 0;
+}
+export async function setClipDownload(userId, clipId, allow) {
+  const { rowCount } = await pool.query('UPDATE clips.clips SET allow_download = $3 WHERE id = $1 AND user_id = $2', [clipId, userId, allow]);
+  return rowCount > 0;
+}
+// Owner-only delete: returns the R2 keys to remove, or null when the clip is not the user's.
+export async function deleteClip(userId, clipId) {
+  const { rows } = await pool.query('DELETE FROM clips.clips WHERE id = $1 AND user_id = $2 RETURNING key, poster_key, v720_key, v360_key', [clipId, userId]);
+  return rows[0] ? [rows[0].key, rows[0].poster_key, rows[0].v720_key, rows[0].v360_key].filter(Boolean) : null;
+}
+// One view per call; the owner watching their own clip does not count.
+export async function addView(clipId, userId) {
+  const { rows } = await pool.query('UPDATE clips.clips SET views = views + 1 WHERE id = $1 AND user_id IS DISTINCT FROM $2::uuid RETURNING views', [clipId, userId || null]);
+  if (rows[0]) return rows[0].views;
+  return (await pool.query('SELECT views FROM clips.clips WHERE id = $1', [clipId])).rows[0]?.views ?? 0;
+}
+export async function addReport(clipId, userId, reason) {
+  await pool.query('INSERT INTO clips.reports (clip_id, user_id, reason) VALUES ($1,$2,$3)', [clipId, userId || null, reason]);
 }
 export async function setMediaPrivacy(userId, id, privacy) {
   const { rowCount } = await pool.query('UPDATE clips.media SET privacy = $3 WHERE id = $1 AND user_id = $2', [id, userId, privacy]);

@@ -180,7 +180,7 @@ const present = async (row, vs = {}) => ({
   music: row.music_name ? { id: row.music_id, name: row.music_name, artist: row.music_artist } : null,
   author: { handle: row.handle, name: row.display_name, avatar: row.avatar_key && configured ? await mediaUrl(row.avatar_key) : null },
   tags: row.tags ? row.tags.split(' ') : [],
-  likes: row.likes, comments: row.comments, saves: row.saves, shares: row.shares, views: row.views, createdAt: row.created_at,
+  likes: row.likes, comments: row.comments, saves: row.saves, shares: row.shares, views: row.views, allowDownload: row.allow_download !== false, createdAt: row.created_at,
   viewer: { liked: !!vs.liked, saved: !!vs.saved, following: !!vs.following, requested: !!vs.requested, favorited: !!vs.favorited },
 });
 // ---- accounts: session cookie `sid` -> users row. Reads work anonymously; every write needs a login. ----
@@ -362,6 +362,29 @@ social.patch('/clips/:id/privacy', needUser, wrap(async (req, res) => {
   if (!(await db.setClipPrivacy(req.user.id, req.params.id, req.body.privacy))) return res.status(404).json({ error: 'clip introuvable' });
   res.json({ ok: true, privacy: req.body.privacy });
 }));
+social.patch('/clips/:id/download', needUser, wrap(async (req, res) => {
+  if (!clipId(req.params.id) || typeof req.body?.allow !== 'boolean') return res.status(400).json({ error: 'requête invalide' });
+  if (!(await db.setClipDownload(req.user.id, req.params.id, req.body.allow))) return res.status(404).json({ error: 'clip introuvable' });
+  res.json({ ok: true, allow: req.body.allow });
+}));
+social.delete('/clips/:id', needUser, wrap(async (req, res) => {
+  if (!clipId(req.params.id)) return res.status(400).json({ error: 'requête invalide' });
+  const keys = await db.deleteClip(req.user.id, req.params.id);
+  if (!keys) return res.status(403).json({ error: 'Seul le propriétaire peut supprimer ce clip' });
+  if (configured) for (const Key of keys) s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key })).catch(() => {});
+  res.json({ ok: true });
+}));
+social.post('/clips/:id/view', wrap(async (req, res) => {
+  const c = await clipOr404(req, res); if (!c) return;
+  res.json({ views: await db.addView(c.id, req.user?.id) });
+}));
+social.post('/clips/:id/report', needViewer, wrap(async (req, res) => {
+  const c = await clipOr404(req, res); if (!c) return;
+  const reason = String(req.body?.reason || '').trim().slice(0, 200);
+  if (!reason) return res.status(400).json({ error: 'Choisissez un motif' });
+  await db.addReport(c.id, req.viewer.id, reason);
+  res.json({ ok: true });
+}));
 social.get('/me/follow-requests', needUser, wrap(async (req, res) => res.json({ requests: await db.pendingRequests(req.user.id) })));
 social.post('/me/follow-requests/:handle', needUser, wrap(async (req, res) => {
   if (!(await db.answerRequest(req.user.id, String(req.params.handle).slice(0, 80), req.body?.accept === true))) return res.status(404).json({ error: 'demande introuvable' });
@@ -444,6 +467,8 @@ api.get('/clips/:id/download', wrap(async (req, res) => {
   if (!clipId(req.params.id)) return res.status(400).json({ error: 'bad request' });
   const key = await findKey(req.params.id);
   if (!key) return res.status(404).json({ error: 'clip introuvable' });
+  const row = dbConfigured ? await clipById(req.params.id) : null;
+  if (row && !row.allow_download && row.author_id !== req.user?.id) return res.status(403).json({ error: 'Le propriétaire a désactivé le téléchargement' });
   const url = await getSignedUrl(s3, new GetObjectCommand({
     Bucket: R2_BUCKET, Key: key,
     ResponseContentDisposition: `attachment; filename="${key.slice(6)}"`,
