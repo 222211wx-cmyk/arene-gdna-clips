@@ -566,6 +566,17 @@
   $('up-open').onclick = openUpload;
   $('up-close').onclick = closeOverlay;
   // Retour: from the edit step back to the file picker (gallery); from the picker, close the sheet
+  // in-app gallery: my published clips, with ‹ Retour (back to Importer) and ✕
+  $('up-gal').onclick = function () {
+    if (!me) return needLogin('Connectez-vous pour voir votre galerie.');
+    openModal('<div class="mb-3 flex items-center justify-between gap-2"><button id="gl-back" class="' + btn2 + ' !py-2">‹ Retour</button><h2 class="flex-1 text-center text-lg font-extrabold">Ma galerie</h2><button data-x aria-label="Fermer" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-lg">✕</button></div><div id="gl-body" class="text-sm text-neutral-400">Chargement…</div>');
+    $('gl-back').onclick = openUpload;
+    api('GET', '/api/users/' + encodeURIComponent(me.handle) + '/clips').then(function (r) {
+      var b = $('gl-body'); if (!b) return;
+      b.innerHTML = r.clips.length ? '<div class="grid grid-cols-3 gap-2">' + r.clips.map(tile).join('') + '</div>' : 'Aucun clip publié pour le moment.';
+      bindClips(b, r.clips); icons();
+    }).catch(function (e) { var b = $('gl-body'); if (b) b.textContent = e.message; });
+  };
   $('up-back').onclick = function () {
     if ($('st-2').hidden) return closeOverlay();
     try { $('st-prev').pause(); } catch (e) { /* ignore */ }
