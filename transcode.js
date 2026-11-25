@@ -48,13 +48,14 @@ async function work({ s3, bucket, key, id, trim, filter }) {
     const src = path.join(dir, 'src');
     const g = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     await pipeline(g.Body, createWriteStream(src));
+    const ms = Math.max(15 * 60 * 1000, Math.ceil((g.ContentLength || 0) / 2 ** 30) * 30 * 60 * 1000);   // 30 min per GB: no fixed ceiling for big files
     const o7 = path.join(dir, '720.mp4'), o3 = path.join(dir, '360.mp4');
     const cut = trim ? ['-ss', String(trim.start), '-t', String(+(trim.end - trim.start).toFixed(2))] : [];
     const fx = FILTERS[filter] ? FILTERS[filter] + ',' : '';
     await run('ffmpeg', ['-hide_banner', '-nostdin', '-y', ...cut, '-i', src,
       '-filter_complex', `[0:v:0]${fx}split=2[a][b];[a]${scale(720)}[v7];[b]${scale(360)}[v3]`,
       '-map', '[v7]', '-map', '0:a:0?', ...enc('1100k', '2200k', 25, '128k'), o7,
-      '-map', '[v3]', '-map', '0:a:0?', ...enc('450k', '900k', 28, '64k'), o3]);
+      '-map', '[v3]', '-map', '0:a:0?', ...enc('450k', '900k', 28, '64k'), o3], ms);
     const k = keysFor(id), sizes = {};
     for (const [name, file, Key] of [['v720', o7, k.v720], ['v360', o3, k.v360]]) {
       const body = await readFile(file); sizes[name] = (await stat(file)).size;

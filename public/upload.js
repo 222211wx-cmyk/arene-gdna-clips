@@ -1,9 +1,9 @@
-// Upload the original file straight to R2
-// with 20 parallel presigned multipart parts, resumable across reloads / network loss.
+// P.P.O. uploader: Parallel (8 pieces at once), Piece (size chosen by the server, grows for huge files), Open (no size cap).
+// Straight to R2 with presigned pieces; resumable across reloads / network loss: only the pieces R2 does not have are sent.
 
-const THREADS = 6;
-const MAX_MB = 4096, EXTS = ['mp4', 'mov', 'webm'];
-const extOf = (f) => { const e = (f.name.split('.').pop() || '').toLowerCase(); return EXTS.includes(e) ? e : f.type === 'video/quicktime' ? 'mov' : f.type === 'video/webm' ? 'webm' : f.type === 'video/mp4' ? 'mp4' : null; };
+const THREADS = 8;
+const EXTS = ['mp4', 'mov', 'webm'], ARCH = ['zip', '7z', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz'];
+const extOf = (f) => { const e = (f.name.split('.').pop() || '').toLowerCase(); return EXTS.includes(e) || ARCH.includes(e) ? e : f.type === 'video/quicktime' ? 'mov' : f.type === 'video/webm' ? 'webm' : f.type === 'video/mp4' ? 'mp4' : null; };
 const CAMERA = /\b(?:VID|IMG|MOV|MVI|PXL|DSC|PIC|WA|Screen[ _-]?Recording)[-_ ]*\d/i;
 const guessTitle = (f) => { const t = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(); return CAMERA.test(t) || /^[\d\s.]+$/.test(t) ? '' : t; };
 const $ = (id) => document.getElementById(id);
@@ -25,8 +25,8 @@ const applyFxPreview = () => { $('st-prev').style.filter = st.filter ? FCSS[st.f
 $('up-file').onchange = async (e) => {
   const file = e.target.files[0]; e.target.value = '';
   if (!file || busy) return;
-  if (!extOf(file)) { setProgress('❌ Format non supporté: utilisez mp4, mov ou webm', 0); return; }
-  if (file.size > MAX_MB * 1048576) { setProgress(`❌ Fichier trop gros (${mb(file.size)} MB, max ${MAX_MB} MB)`, 0); return; }
+  if (!extOf(file)) { setProgress('❌ Format non supporté: vidéo mp4, mov, webm ou archive zip, 7z, rar, tar, gz', 0); return; }
+  if (ARCH.includes(extOf(file))) return importArchive(file);
   st.file = file; st.music = null; st.fx = { eclairage: 0, couleur: 0, cartoon: false };
   result.innerHTML = ''; setProgress('', 0); renderMusic(); applyFxPreview(); $('st-title').value = guessTitle(file);
   const pv = $('st-prev'); pv.src = URL.createObjectURL(file);
@@ -162,7 +162,7 @@ $('st-pub').onclick = async () => {
     setProgress('Miniature…', 100);
     const poster = await uploadPoster(file, key);
     setProgress('Compression 720p + 360p…', 100);
-    const rec = await api('/publish', {
+    const rec = await publish({
       key, title, description: $('st-desc').value, comment: $('st-comment').value,
       musicId: music ? music.id : null, enhancement: { ...st.fx }, poster, filter: st.filter, privacy: $('st-priv').value,
       trim: st.dur && (st.t0 > 0.05 || st.t1 < st.dur - 0.05) ? { start: st.t0, end: st.t1 } : null,
@@ -211,7 +211,7 @@ const api = async (path, body) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const online = () => navigator.onLine ? Promise.resolve() : new Promise((r) => addEventListener('online', r, { once: true }));
-const MAX_TRIES = 6;
+const MAX_TRIES = 12;
 const fatal = (e) => e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
 
 async function retry(fn, onFail) {
@@ -226,29 +226,20 @@ async function retry(fn, onFail) {
 }
 
 async function upload(blob, fp) {
-  const ext = extOf(blob), lsKey = 'upl2:' + fp;
+  const ext = extOf(blob), lsKey = 'upl3:' + fp, size = blob.size;
   let s = JSON.parse(localStorage.getItem(lsKey) || 'null');
   let done = new Set();
-  if (s && s.mode === 'multipart') {
+  if (s) {   // resume: R2 tells us which pieces it already has
     const r = await api(`/upload/parts?key=${encodeURIComponent(s.key)}&uploadId=${encodeURIComponent(s.uploadId)}`).catch(() => ({ gone: true }));
+    if (r.complete) { localStorage.removeItem(lsKey); setProgress('✅ Envoi terminé 100%', 100); return s.key; }
     if (r.gone) s = null; else done = new Set(r.parts.map((p) => p.partNumber));
-  } else s = null;   // single PUT: just restart
+  }
   if (!s) {
-    s = await api('/upload-url', { size: blob.size, ext, filename: blob.name });
-    if (s.mode === 'multipart') localStorage.setItem(lsKey, JSON.stringify(s));
+    s = await retry(() => api('/upload-url', { size, ext, filename: blob.name }));
+    localStorage.setItem(lsKey, JSON.stringify(s));
   }
-  const size = blob.size;
   const flaky = (e, a) => { label.textContent = `Connexion instable (${e.message}), nouvel essai ${a}/${MAX_TRIES - 1}…`; };
-
-  if (s.mode === 'single') {
-    await retry(() => putPart(s.url, blob, s.contentType, (b) => paint(b, size), s.cacheControl), (e, a) => { flaky(e, a); bar.style.width = '0%'; });
-    await api('/upload-complete', { key: s.key });
-    setProgress('✅ Envoi terminé 100%', 100);
-    return s.key;
-  }
-
-  const total = Math.max(1, Math.ceil(size / s.partSize));
-  const sent = new Array(total + 1).fill(0);
+  const total = s.totalParts, sent = new Array(total + 1).fill(0);
   const partLen = (n) => Math.min(s.partSize, size - (n - 1) * s.partSize);
   for (const n of done) sent[n] = partLen(n);
   const render = () => paint(sent.reduce((a, b) => a + b, 0), size);
@@ -268,24 +259,64 @@ async function upload(blob, fp) {
   };
   await Promise.all(Array.from({ length: Math.min(THREADS, queue.length) }, worker));
   if (failed) throw failed;
-  await api('/upload-complete', { key: s.key, uploadId: s.uploadId, totalParts: total });
+  await retry(() => api('/upload-complete', { key: s.key, uploadId: s.uploadId, totalParts: total }));
   localStorage.removeItem(lsKey);
   setProgress('✅ Envoi terminé 100%', 100);
   return s.key;
 }
 const paint = (sentBytes, size) => { const p = Math.min(100, Math.floor((sentBytes / size) * 100)); setProgress(`Envoi… ${p}% (${mb(sentBytes)} / ${mb(size)} MB)`, p); };
 
+/* ---------- archives: upload with the same uploader, the server unpacks to R2, every video is published ---------- */
+async function importArchive(file) {
+  if (busy) return;
+  busy = true; result.innerHTML = '';
+  try {
+    const key = await upload(file, `${file.name}|${file.size}|${file.lastModified}`);
+    setProgress('Décompression…', 100);
+    const { id } = await retry(() => api('/extract', { key }));
+    let job;
+    for (;;) {
+      await sleep(2000);
+      job = await retry(() => api('/extract/' + id));
+      if (job.step === 'error') throw new Error(job.error);
+      if (job.step === 'done') break;
+      setProgress({ queued: 'Décompression en attente…', download: 'Décompression : lecture…', extract: 'Décompression…', upload: `Décompression : ${job.done || 0}/${job.total || '?'} vidéos` }[job.step] || 'Décompression…', job.pct || 0);
+    }
+    let n = 0;
+    for (const c of job.clips) {
+      setProgress(`Publication ${++n}/${job.clips.length}…`, 100);
+      const t = c.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+      const title = t.length >= 2 && !CAMERA.test(t) ? t.slice(0, 120) : `Clip importé ${n}`;
+      const rec = await publish({ key: c.key, title, description: '', comment: '', musicId: null, enhancement: {}, poster: false, filter: '', privacy: 'public', trim: null });
+      if (n === 1) showClip(rec);
+    }
+    setProgress(`✅ ${job.clips.length} vidéo(s) publiée(s)`, 100);
+  } catch (err) { console.error(err); setProgress('❌ ' + err.message + ' — choisissez la même archive pour reprendre', 0); }
+  finally { busy = false; }
+}
+
+// Publish = compression on the server (minutes for a big file): start the job, then poll it. Never bound by a request timeout.
+async function publish(body) {
+  const { id } = await retry(() => api('/publish', body));
+  for (;;) {
+    await sleep(2000);
+    const j = await retry(() => api('/publish/' + id));
+    if (j.step === 'error') throw new Error(j.error);
+    if (j.step === 'done') return j.clip;
+  }
+}
+
 function putPart(url, chunk, contentType, onBytes, cacheControl) {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
+    let t; const stall = () => { clearTimeout(t); t = setTimeout(() => { x.abort(); reject(new Error('envoi bloqué')); }, 90000); };   // no bytes moving for 90 s -> retry this piece
     x.open('PUT', url);
     if (contentType) x.setRequestHeader('Content-Type', contentType);
     if (cacheControl) x.setRequestHeader('Cache-Control', cacheControl);
-    x.upload.onprogress = (e) => onBytes(e.loaded);
-    x.onload = () => (x.status >= 200 && x.status < 300 ? resolve() : reject(new Error('R2 a répondu ' + x.status)));
-    x.onerror = () => reject(new Error('R2 injoignable (réseau ou CORS du bucket)'));
-    x.ontimeout = () => reject(new Error('timeout'));
-    x.timeout = 5 * 60000;
+    x.upload.onprogress = (e) => { stall(); onBytes(e.loaded); };
+    x.onload = () => { clearTimeout(t); x.status >= 200 && x.status < 300 ? resolve() : reject(new Error('R2 a répondu ' + x.status)); };
+    x.onerror = () => { clearTimeout(t); reject(new Error('R2 injoignable (réseau ou CORS du bucket)')); };
+    stall();
     x.send(chunk);
   });
 }
