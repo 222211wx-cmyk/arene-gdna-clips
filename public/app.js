@@ -540,15 +540,19 @@
     on('tb-del2', deleteAccountModal);
     on('tb-out', function () { if (me) logout(); else nav('/login'); });
   }
-  // ⋮ is draggable: press and move it anywhere; the spot is remembered
+  // ⋮ is draggable: press and move it anywhere; the spot is remembered (as a fraction of the app column)
   (function () {
     var b = $('b-tools'), moved = false, sx, sy, ox, oy, down = false;
-    function put(x, y) { x = Math.max(4, Math.min(innerWidth - 44, x)); y = Math.max(4, Math.min(innerHeight - 44, y)); b.style.left = x + 'px'; b.style.top = y + 'px'; }
-    try { var p = JSON.parse(localStorage.getItem('toolsPos') || 'null'); if (p) put(p.x * innerWidth, p.y * innerHeight); } catch (e) { /* ignore */ }
+    function par() { return (b.offsetParent || document.body).getBoundingClientRect(); }
+    function put(x, y) { var P = par(); x = Math.max(4, Math.min(P.width - 44, x)); y = Math.max(4, Math.min(P.height - 44, y)); b.style.left = x + 'px'; b.style.top = y + 'px'; }
+    try { var sp = JSON.parse(localStorage.getItem('toolsPos') || 'null'); if (sp) put(sp.x * par().width, sp.y * par().height); } catch (e) { /* ignore */ }
+    // default spot: exactly 2px under Home, same left edge (follows Home if the layout moves)
+    function dock() { if (localStorage.getItem('toolsPos') || down) return; var h = $('b-home').getBoundingClientRect(), P = par(); if (!h.width) return; b.style.left = Math.round(h.left - P.left) + 'px'; b.style.top = Math.round(h.bottom + 2 - P.top) + 'px'; }
+    dock(); addEventListener('resize', dock); setInterval(dock, 600);
     b.style.touchAction = 'none';
-    b.addEventListener('pointerdown', function (e) { down = true; moved = false; sx = e.clientX; sy = e.clientY; var r = b.getBoundingClientRect(); ox = r.left; oy = r.top; b.setPointerCapture(e.pointerId); });
+    b.addEventListener('pointerdown', function (e) { down = true; moved = false; sx = e.clientX; sy = e.clientY; var r = b.getBoundingClientRect(), P = par(); ox = r.left - P.left; oy = r.top - P.top; b.setPointerCapture(e.pointerId); });
     b.addEventListener('pointermove', function (e) { if (!down) return; var dx = e.clientX - sx, dy = e.clientY - sy; if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return; moved = true; put(ox + dx, oy + dy); });
-    b.addEventListener('pointerup', function () { if (!down) return; down = false; if (moved) { var r = b.getBoundingClientRect(); try { localStorage.setItem('toolsPos', JSON.stringify({ x: r.left / innerWidth, y: r.top / innerHeight })); } catch (e) { /* ignore */ } } });
+    b.addEventListener('pointerup', function () { if (!down) return; down = false; if (moved) { var r = b.getBoundingClientRect(), P = par(); try { localStorage.setItem('toolsPos', JSON.stringify({ x: (r.left - P.left) / P.width, y: (r.top - P.top) / P.height })); } catch (e) { /* ignore */ } } });
     b.onclick = function () { if (moved) { moved = false; return; } toolbox(); };
   })();
 
