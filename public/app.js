@@ -9,7 +9,20 @@
   var me = null, unread = 0;
   var feedClips = [], seen = {}, feedNext = null, feedI = 0, busy = false;
   var L = feedClips, idx = 0, shownId = null, viewer = false, vlist = null;
-  var soundOn = false, loops = 0, userPaused = false, maxI = 0;
+  var soundOn = (function () { try { return localStorage.getItem('sound') === '1'; } catch (e) { return false; } })(), loops = 0, userPaused = false, maxI = 0;
+
+  /* ================= stay signed in: the session token is also kept on this device and sent with every /api call ================= */
+  var TOK = 'sid';
+  var tokGet = function () { try { return localStorage.getItem(TOK) || ''; } catch (e) { return ''; } };
+  var tokSet = function (t) { try { if (t) localStorage.setItem(TOK, t); else localStorage.removeItem(TOK); } catch (e) { /* private mode */ } };
+  (function () {
+    var f = window.fetch;
+    window.fetch = function (u, o) {
+      var t = tokGet(), url = typeof u === 'string' ? u : (u && u.url) || '';
+      if (t && /^(\/(?!\/)|https?:\/\/[^/]*)\/?api\//.test(url.replace(location.origin, ''))) { o = o || {}; o.headers = Object.assign({}, o.headers instanceof Headers ? Object.fromEntries(o.headers) : o.headers, { 'x-sid': t }); }
+      return f.call(this, u, o);
+    };
+  })();
 
   /* ================= helpers ================= */
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -168,7 +181,12 @@
   if (io) io.observe(v);
   $('replay').onclick = function () { resetLoops(); userPaused = false; v.currentTime = 0; tryPlay(); };
   function paintSound() { $('r-snd').querySelector('i,svg').outerHTML = '<i data-lucide="' + (soundOn ? 'volume-2' : 'volume-x') + '" class="h-5 w-5"></i>'; icons(); }
-  $('r-snd').onclick = function () { soundOn = !soundOn; v.muted = !soundOn; paintSound(); };
+  // volume button: one tap = sound on (open), next tap = mute; the choice is kept until the user changes it
+  var vol = 1;
+  function applyVol() { [v, buf, $('pc-v')].forEach(function (el) { try { el.volume = 1; } catch (e) { /* iOS: read-only */ } }); }
+  function setSound(on) { soundOn = on; try { localStorage.setItem('sound', on ? '1' : '0'); } catch (e) { /* ignore */ } v.muted = !on; buf.muted = !on; applyVol(); paintSound(); if (on) tryPlay(); }
+  $('r-snd').onclick = function () { setSound(!soundOn); toast(soundOn ? 'Son activé' : 'Son coupé'); };
+  applyVol(); paintSound();
 
   function show(dir) {
     var c = cur(); if (!c) { v.removeAttribute('src'); v.load(); poster.classList.add('hidden'); shownId = null; $('views-n').textContent = '0'; return paint(); }
@@ -188,7 +206,7 @@
     tryPlay();
     prime();
     if (L === feedClips && idx >= L.length - 3) more();
-    zoomReset(); countView(c);
+    applyVol(); zoomReset(); countView(c);
     paint(); updateBar();
     if (dir) { v.classList.remove('slide-up', 'slide-down'); void v.offsetWidth; v.classList.add(dir > 0 ? 'slide-up' : 'slide-down'); }
   }
@@ -315,15 +333,28 @@
 
   /* share sheet: copy / native share / WhatsApp, each recorded in the database */
   $('r-share').onclick = function () {
-    var c = cur(); if (!c) return; var url = BASE + '/c/' + encodeURIComponent(c.id), text = label(c);
+    var c = cur(); if (!c) return; var url = location.origin + '/c/' + encodeURIComponent(c.id), text = label(c);
     openModal(head('Partager') + '<div class="mb-3 truncate rounded-xl bg-neutral-800 px-3 py-2.5 text-sm text-neutral-300" id="sh-url">' + esc(url) + '</div><div class="flex flex-col gap-2">' +
       '<button id="sh-copy" class="' + btn + '">Copier le lien</button>' +
-      (navigator.share ? '<button id="sh-native" class="' + btn2 + '">Partager via…</button>' : '') +
+      (navigator.canShare ? '<button id="sh-file" class="' + btn + '">Envoyer la vidéo</button>' : '') + (navigator.share ? '<button id="sh-native" class="' + btn2 + '">Envoyer le lien…</button>' : '<a id="sh-sms" href="sms:?&body=' + encodeURIComponent(text + ' ' + url) + '" class="' + btn2 + ' text-center">Envoyer par SMS</a>') +
       '<a id="sh-wa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(text + ' ' + url) + '" class="' + btn2 + ' text-center">WhatsApp</a></div>');
     function rec(channel) { return api('POST', '/api/clips/' + encodeURIComponent(c.id) + '/share', { channel: channel }).then(function (r) { c.shares = r.count; if (cur() === c) paint(); }).catch(function () { /* count refreshes on next load */ }); }
     $('sh-copy').onclick = function () { copyText(url).then(function () { $('sh-copy').textContent = 'Lien copié ✓'; rec('link'); }); };
     if ($('sh-native')) $('sh-native').onclick = function () { navigator.share({ title: text, url: url }).then(function () { rec('native'); }).catch(function () { /* cancelled */ }); };
+    if ($('sh-file')) $('sh-file').onclick = function () {
+      var b = $('sh-file'); b.textContent = 'Préparation de la vidéo…'; b.disabled = true;
+      fetch('/api/clips/' + encodeURIComponent(c.id) + '/download').then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || 'Vidéo indisponible'); });
+        return r.blob();
+      }).then(function (blob) {
+        var f = new File([blob], (c.title || 'clip').replace(/[^\w\-]+/g, '_') + '.mp4', { type: blob.type || 'video/mp4' });
+        if (!navigator.canShare({ files: [f] })) throw new Error('Votre téléphone ne peut pas envoyer ce fichier');
+        return navigator.share({ files: [f], title: text, text: text + ' ' + url }).then(function () { rec('file'); });
+      }).catch(function (e) { if (e && e.name !== 'AbortError') toast(e.message || 'Envoi impossible'); })
+        .then(function () { b.textContent = 'Envoyer la vidéo'; b.disabled = false; });
+    };
     $('sh-wa').onclick = function () { rec('whatsapp'); };
+    if ($('sh-sms')) $('sh-sms').onclick = function () { rec('sms'); };
   };
 
   /* comments */
@@ -400,7 +431,7 @@
         $('d-chk').disabled = true; $('d-ok').textContent = '';
         api('POST', '/api/me/check-password', { password: pw }).then(function (r) { r.ok ? okEl(true, '✓ Mot de passe correct') : okEl(false, '✗ Mot de passe incorrect'); }).catch(function (e) { okEl(false, e.message); }).then(function () { $('d-chk').disabled = false; });
       };
-      $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
+      $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { tokSet(''); me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
   }
 
   /* ================= Toolbox (⋮ under Home): clip tools + profile / account tools ================= */
@@ -486,7 +517,7 @@
       try { var r = f.call(el); if (r && r.catch) r.catch(function () { toast('Plein écran refusé'); }); } catch (e) { toast('Plein écran refusé'); }
       el.controls = true; closeOverlay();
     });
-    on('tb-vol', function () { soundOn = !soundOn; v.muted = !soundOn; buf.muted = !soundOn; paintSound(); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
+    on('tb-vol', function () { setSound(!soundOn); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
     on('tb-dl', function () { var a = document.createElement('a'); a.href = '/api/clips/' + encodeURIComponent(c.id) + '/download'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); toast('Téléchargement…'); });
     on('tb-dlset', guard(function () {
       var allow = !(c.allowDownload !== false);
@@ -509,7 +540,21 @@
     on('tb-del2', deleteAccountModal);
     on('tb-out', function () { if (me) logout(); else nav('/login'); });
   }
-  $('b-tools').onclick = toolbox;
+  // ⋮ is draggable: press and move it anywhere; the spot is remembered (as a fraction of the app column)
+  (function () {
+    var b = $('b-tools'), moved = false, sx, sy, ox, oy, down = false;
+    function par() { return (b.offsetParent || document.body).getBoundingClientRect(); }
+    function put(x, y) { var P = par(); x = Math.max(4, Math.min(P.width - 44, x)); y = Math.max(4, Math.min(P.height - 44, y)); b.style.left = x + 'px'; b.style.top = y + 'px'; }
+    try { var sp = JSON.parse(localStorage.getItem('toolsPos') || 'null'); if (sp) put(sp.x * par().width, sp.y * par().height); } catch (e) { /* ignore */ }
+    // default spot: exactly 2px under Home, same left edge (follows Home if the layout moves)
+    function dock() { if (localStorage.getItem('toolsPos') || down) return; var h = $('b-home').getBoundingClientRect(), P = par(); if (!h.width) return; b.style.left = Math.round(h.left - P.left) + 'px'; b.style.top = Math.round(h.bottom + 2 - P.top) + 'px'; }
+    dock(); addEventListener('resize', dock); setInterval(dock, 600);
+    b.style.touchAction = 'none';
+    b.addEventListener('pointerdown', function (e) { down = true; moved = false; sx = e.clientX; sy = e.clientY; var r = b.getBoundingClientRect(), P = par(); ox = r.left - P.left; oy = r.top - P.top; b.setPointerCapture(e.pointerId); });
+    b.addEventListener('pointermove', function (e) { if (!down) return; var dx = e.clientX - sx, dy = e.clientY - sy; if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return; moved = true; put(ox + dx, oy + dy); });
+    b.addEventListener('pointerup', function () { if (!down) return; down = false; if (moved) { var r = b.getBoundingClientRect(), P = par(); try { localStorage.setItem('toolsPos', JSON.stringify({ x: (r.left - P.left) / P.width, y: (r.top - P.top) / P.height })); } catch (e) { /* ignore */ } } });
+    b.onclick = function () { if (moved) { moved = false; return; } toolbox(); };
+  })();
 
   // after a delete: drop the clip everywhere and go to the next one (or back to the feed when none is left)
   function afterDelete(c) {
@@ -530,7 +575,7 @@
     var pcv = $('pc-v'), box = $('pc-back');
     v.pause();
     openOverlay(function () { pcv.pause(); pcv.removeAttribute('src'); pcv.load(); box.hidden = true; });
-    $('pc-t').textContent = label(c); pcv.src = srcOf(c); pcv.muted = !soundOn; box.hidden = false;
+    $('pc-t').textContent = label(c); pcv.src = srcOf(c); pcv.muted = !soundOn; applyVol(); box.hidden = false;
     var p = pcv.play(); if (p && p.catch) p.catch(function () { /* user presses play */ });
     modal.hidden = true; back.hidden = true; modal.innerHTML = '';
   }
@@ -547,6 +592,24 @@
   }
   $('up-open').onclick = openUpload;
   $('up-close').onclick = closeOverlay;
+  // Retour: from the edit step back to the file picker (gallery); from the picker, close the sheet
+  // in-app gallery: my published clips, with ‹ Retour (back to Importer) and ✕
+  $('up-gal').onclick = function () {
+    if (!me) return needLogin('Connectez-vous pour voir votre galerie.');
+    openModal('<div class="mb-3 flex items-center justify-between gap-2"><button id="gl-back" class="' + btn2 + ' !py-2">‹ Retour</button><h2 class="flex-1 text-center text-lg font-extrabold">Ma galerie</h2><button data-x aria-label="Fermer" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-lg">✕</button></div><div id="gl-body" class="text-sm text-neutral-400">Chargement…</div>');
+    $('gl-back').onclick = openUpload;
+    api('GET', '/api/users/' + encodeURIComponent(me.handle) + '/clips').then(function (r) {
+      var b = $('gl-body'); if (!b) return;
+      b.innerHTML = r.clips.length ? '<div class="grid grid-cols-3 gap-2">' + r.clips.map(tile).join('') + '</div>' : 'Aucun clip publié pour le moment.';
+      bindClips(b, r.clips); icons();
+    }).catch(function (e) { var b = $('gl-body'); if (b) b.textContent = e.message; });
+  };
+  $('up-back').onclick = function () {
+    if ($('st-2').hidden) return closeOverlay();
+    try { $('st-prev').pause(); } catch (e) { /* ignore */ }
+    $('st-2').hidden = true; $('st-1').hidden = false; $('up-title').textContent = 'Nouveau clip'; $('up-file').value = '';
+    $('up-result').innerHTML = ''; $('up-label').textContent = ''; $('up-bar').style.width = '0';
+  };
 
   /* ================= pages ================= */
   var TAB = { '/': 'home', '/search': 'search', '/clips': 'clips', '/messages': 'messages' };
@@ -715,7 +778,7 @@
   function gallery(body, u, kind, mine) {
     var photo = kind === 'photo';
     function draw(items) {
-      body.innerHTML = '<div class="mb-3 flex items-center justify-between"><button id="g-back" class="' + btn2 + ' !py-2">‹ Retour</button><button id="g-x" aria-label="Fermer" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-lg">✕</button></div>' + (mine ? '<label for="g-pv" class="text-xs font-bold text-neutral-300">Visibilité des nouveaux ajouts</label><select id="g-pv" class="' + inp + ' mb-2 mt-1"><option value="public">Public</option><option value="followers">Abonnés uniquement</option><option value="private">Privé</option></select><label class="' + btn + ' mb-3 flex cursor-pointer items-center justify-center gap-2 text-center">' + (photo ? 'Ajouter une photo' : 'Ajouter une vidéo') + '<input id="g-file" type="file" class="sr-only" multiple accept="' + (photo ? 'image/jpeg,image/png,image/webp,image/gif' : 'video/mp4,video/quicktime,video/webm') + '"></label><div id="g-st" class="mb-2 text-xs text-neutral-400"></div>' : '') +
+      body.innerHTML = '<div class="sticky -top-4 z-10 -mx-4 mb-3 flex items-center justify-between bg-neutral-950 px-4 py-2"><button id="g-back" class="' + btn2 + ' !py-2">‹ Retour</button><button id="g-x" aria-label="Fermer" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-lg">✕</button></div>' + (mine ? '<label for="g-pv" class="text-xs font-bold text-neutral-300">Visibilité des nouveaux ajouts</label><select id="g-pv" class="' + inp + ' mb-2 mt-1"><option value="public">Public</option><option value="followers">Abonnés uniquement</option><option value="private">Privé</option></select><label class="' + btn + ' mb-3 flex cursor-pointer items-center justify-center gap-2 text-center">' + (photo ? 'Ajouter une photo' : 'Ajouter une vidéo') + '<input id="g-file" type="file" class="sr-only" multiple accept="' + (photo ? 'image/jpeg,image/png,image/webp,image/gif' : 'video/mp4,video/quicktime,video/webm') + '"></label><div id="g-st" class="mb-2 text-xs text-neutral-400"></div>' : '') +
         (items.length ? '<div class="grid grid-cols-3 gap-2">' + items.map(function (m) { return '<div class="relative aspect-square"><button data-m="' + m.id + '" class="relative h-full w-full overflow-hidden rounded-xl bg-neutral-800">' + (photo ? '<img src="' + esc(m.url) + '" loading="lazy" alt="" class="h-full w-full object-cover">' : '<video src="' + esc(m.url) + '#t=0.1" preload="metadata" muted playsinline class="h-full w-full object-cover"></video><span class="absolute bottom-1 right-1 rounded-full bg-black/60 px-1.5 text-[10px]">▶</span>') + lockIcon(m.privacy) + '</button>' + (mine ? dots('media', m.id) : '') + '</div>'; }).join('') + '</div>'
           : (mine ? '<div class="rounded-2xl bg-neutral-900 p-5 text-center text-sm text-neutral-300">' + (photo ? 'Aucune photo pour le moment. Ajoutez votre première photo.' : 'Aucune vidéo pour le moment. Ajoutez votre première vidéo.') + '</div>' : msg(photo ? 'Aucune photo.' : 'Aucune vidéo.')));
       body.querySelectorAll('[data-m]').forEach(function (b) { b.onclick = function () { var m = items.filter(function (x) { return String(x.id) === b.dataset.m; })[0]; view(m); }; });
@@ -778,7 +841,7 @@
     if (focusId === 'bio') { $('ed-b').focus(); } else if (focusId === 'avatar') { try { $('ed-avf').click(); } catch (x) { /* user taps */ } }
   }
   function logout() {
-    api('POST', '/api/auth/logout').catch(function () { /* cookie cleared anyway */ }).then(function () { me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/login', { replace: true }); });
+    api('POST', '/api/auth/logout').catch(function () { /* cookie cleared anyway */ }).then(function () { tokSet(''); me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/login', { replace: true }); });
   }
 
   /* ---- auth ---- */
@@ -814,7 +877,7 @@
         if (body.username.length < 3) { $('au-err').textContent = 'Le nom d’utilisateur doit faire 3 caractères minimum'; $('au-u').focus(); return; } }
       if (body.password.length < 8) { $('au-err').textContent = 'Le mot de passe doit faire 8 caractères minimum'; return; }
       $('au-go').disabled = true;
-      api('POST', '/api/auth/' + kind, body).then(function (r) { me = r.user; return Promise.all([refreshMe(), reloadFeed()]); }).then(function () { nav(next || '/profile', { replace: true }); })
+      api('POST', '/api/auth/' + kind, body).then(function (r) { tokSet(r.token); me = r.user; return Promise.all([refreshMe(), reloadFeed()]); }).then(function () { nav(next || '/profile', { replace: true }); })
         .catch(function (err) { $('au-err').textContent = err.message; $('au-go').disabled = false; });
     };
   }

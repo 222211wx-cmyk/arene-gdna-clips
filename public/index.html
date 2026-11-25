@@ -23,7 +23,7 @@
   .ico svg{width:100%;height:100%}
   .rail-btn.on svg{fill:#ff2d55;stroke:#ff2d55}
   .rail-btn.saved svg,.rail-btn.fav svg{fill:#FFD700;stroke:#FFD700}
-  #l-rail{position:fixed;z-index:30;left:max(12px,calc(50vw - 240px + 12px));top:calc(env(safe-area-inset-top) + 166px)}
+  #l-rail{position:fixed;z-index:30;left:max(12px,calc(50vw - 240px + 12px));top:calc(env(safe-area-inset-top) + 96px)}
   .tab.active{color:#fbbf24}.tab{color:rgba(255,255,255,.65)}
   svg.lucide{stroke-width:2}
   .glass{background:rgba(20,20,20,.65);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -37,7 +37,8 @@
   #hdr.bare #search-form{display:none}
   #hdr{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:480px;z-index:9999}
   #phone{height:var(--vh,100dvh)}
-  #page{padding-top:60px!important}
+  #hdr.bare ~ #b-tools{top:calc(env(safe-area-inset-top) + 50px)}
+  #page{padding-top:32px!important}
   #vid,#vid2{transform-origin:center center}
   .invisible{visibility:hidden}
 </style>
@@ -71,7 +72,7 @@
     </div>
   </header>
   <!-- Toolbox button: directly under Home -->
-  <button id="b-tools" aria-label="Boîte à outils" title="Boîte à outils" class="absolute left-[54px] top-[calc(env(safe-area-inset-top)+118px)] z-[50] flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="ellipsis-vertical" class="h-5 w-5"></i></button>
+  <button id="b-tools" aria-label="Boîte à outils" title="Boîte à outils" class="absolute left-[54px] top-[calc(env(safe-area-inset-top)+96px)] z-[50] flex h-10 w-10 items-center justify-center rounded-full bg-white/25 ring-2 ring-white/70 shadow-lg"><i data-lucide="ellipsis-vertical" class="h-5 w-5 text-white"></i></button>
   <button id="r-snd" aria-label="Son" class="rail-btn absolute right-3 top-[calc(env(safe-area-inset-top)+112px)] z-[30] flex h-9 w-9 items-center justify-center rounded-full bg-black/45"><i data-lucide="volume-x" class="h-5 w-5"></i></button>
   <button id="replay" hidden aria-label="Revoir" class="absolute left-1/2 top-[42%] z-[30] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-black/70 px-6 py-3 text-base font-extrabold ring-1 ring-white/40"><i data-lucide="rotate-ccw" class="h-5 w-5"></i>Revoir</button>
 
@@ -83,10 +84,8 @@
     <button id="r-save" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Enregistrer"><i data-lucide="bookmark" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
   </aside>
 
-  <!-- Left rail, vertical, above the creator avatar: EQ avatar (my profile), Settings, Title/Caption, Favorite -->
+  <!-- Left rail, vertical, under the Toolbox button: Title/Caption, Favorite (my profile and Settings sit in the creator row at the bottom) -->
   <aside id="l-rail" class="flex flex-col items-center gap-3">
-    <button id="l-eq" aria-label="Mon profil" class="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-sm font-extrabold text-black shadow-lg"><span id="l-eq-t">EQ</span></button>
-    <button id="l-set" aria-label="Paramètres" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="settings" class="h-5 w-5"></i></button>
     <button id="l-cap" aria-label="Titre et légende" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="type" class="h-5 w-5"></i></button>
     <button id="l-fav" aria-label="Favori" aria-pressed="false" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="star" class="h-5 w-5"></i></button>
   </aside>
@@ -99,6 +98,10 @@
         <span class="min-w-0 leading-tight"><span id="author" class="block truncate text-[15px] font-bold txs"></span><span id="handle" class="block truncate text-xs text-white/75 txs"></span></span>
       </button>
       <button id="follow" class="ml-1 shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
+      <div id="l-grp" class="ml-auto flex shrink-0 items-center gap-1 rounded-full bg-black/55 p-1 ring-1 ring-white/30">
+        <button id="l-eq" aria-label="Mon profil" class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-xs font-extrabold text-black"><span id="l-eq-t">EQ</span></button>
+        <button id="l-set" aria-label="Paramètres" class="rail-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10"><i data-lucide="settings" class="h-[18px] w-[18px]"></i></button>
+      </div>
     </div>
     <p class="mt-2 line-clamp-2 text-sm leading-snug txs"><b id="c-title" class="font-extrabold"></b> <span id="caption"></span></p>
   </section>
@@ -138,9 +141,10 @@
 
   <!-- Importer (upload studio, handled by upload.js) -->
   <div class="up-sheet" id="up-sheet" hidden>
-    <div class="up-head"><span id="up-title">Nouveau clip</span><button id="up-close" aria-label="Fermer">✕</button></div>
+    <div class="up-head"><button id="up-back" aria-label="Retour">‹ Retour</button><span id="up-title">Nouveau clip</span><button id="up-close" aria-label="Fermer">✕</button></div>
     <div class="st-step" id="st-1">
       <label class="up-pick" id="up-pick">Choisir un fichier vidéo<input type="file" id="up-file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden></label>
+      <button type="button" id="up-gal" class="up-pick" style="width:100%;margin-top:10px;background:#262626;color:#fff;border:1px solid #404040">Ma galerie (dans l’appli)</button>
     </div>
     <div class="st-step" id="st-2" hidden>
       <video id="st-prev" class="st-prev" playsinline controls loop></video>

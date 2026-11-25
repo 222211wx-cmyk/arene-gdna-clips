@@ -185,9 +185,10 @@ const present = async (row, vs = {}) => ({
 });
 // ---- accounts: session cookie `sid` -> users row. Reads work anonymously; every write needs a login. ----
 const SID = 'sid';
-const sidOf = (req) => (/(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '') || [])[1] || null;
+// the session token comes from the cookie, or from the x-sid header (the app keeps a copy in localStorage so a blocked cookie, e.g. in an embedded preview or Safari, never logs the user out)
+const sidOf = (req) => { const h = req.headers['x-sid']; return (typeof h === 'string' && /^[a-f0-9]{64}$/.test(h) ? h : null) || (/(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '') || [])[1] || null; };
 const secure = (req) => req.secure || req.headers['x-forwarded-proto'] === 'https';
-const setSid = (req, res, token) => res.cookie(SID, token, { maxAge: 30 * 864e5, httpOnly: true, sameSite: 'lax', secure: secure(req), path: '/' });
+const setSid = (req, res, token) => { res.locals.sid = token; res.cookie(SID, token, { maxAge: 365 * 864e5, httpOnly: true, sameSite: secure(req) ? 'none' : 'lax', secure: secure(req), path: '/' }); };
 const presentUser = async (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, bio: u.bio, city: u.city, link: u.link, avatar: u.avatar_key && configured ? await mediaUrl(u.avatar_key) : null, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language } });
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use('/api', wrapMw(async (req) => {
@@ -231,13 +232,13 @@ auth.post('/signup', throttle, wrap(async (req, res) => {
   const r = await db.signup({ email, username, name: name || username, password });
   if (r.error) return res.status(409).json({ error: r.error === 'email' ? 'Cette adresse e-mail a déjà un compte' : 'Ce nom d’utilisateur est déjà pris', field: r.error });
   setSid(req, res, await db.createSession(r.user.id));
-  res.json({ user: await presentUser(r.user) });
+  res.json({ user: await presentUser(r.user), token: res.locals.sid });
 }));
 auth.post('/login', throttle, wrap(async (req, res) => {
   const u = await db.login(String(req.body?.email || '').trim(), String(req.body?.password || ''));
   if (!u) return res.status(401).json({ error: 'E-mail ou mot de passe incorrect' });
   setSid(req, res, await db.createSession(u.id));
-  res.json({ user: await presentUser(u) });
+  res.json({ user: await presentUser(u), token: res.locals.sid });
 }));
 auth.post('/logout', wrap(async (req, res) => { await db.endSession(sidOf(req)); res.clearCookie(SID, { path: '/' }); res.json({ ok: true }); }));
 app.use('/api/auth', auth);
