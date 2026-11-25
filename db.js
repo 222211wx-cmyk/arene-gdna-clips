@@ -125,6 +125,9 @@ ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS allow_download boolean NOT NULL
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS trim_start real;
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS trim_end real;
 ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS accessories text NOT NULL DEFAULT '';
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS overlay_text text NOT NULL DEFAULT '';
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS fx_filter text NOT NULL DEFAULT '';
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS watermark boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS clips.reports (
   id bigserial PRIMARY KEY,
   clip_id text NOT NULL REFERENCES clips.clips(id) ON DELETE CASCADE,
@@ -152,7 +155,7 @@ export async function migrate() {
 export const getDefaultUserId = () => defaultUserId;
 
 const COLS = `c.id, c.key, c.poster_key, c.v720_key, c.v360_key, c.title, c.description, c.comment, c.music_id, c.music_name, c.music_artist,
-  c.enhancement, c.privacy, c.views, c.allow_download, c.trim_start, c.trim_end, c.accessories, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
+  c.enhancement, c.privacy, c.views, c.allow_download, c.trim_start, c.trim_end, c.accessories, c.overlay_text, c.fx_filter, c.watermark, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
   (SELECT count(*)::int FROM clips.likes l WHERE l.clip_id = c.id) AS likes,
   (SELECT count(*)::int FROM clips.comments m WHERE m.clip_id = c.id) AS comments,
   (SELECT count(*)::int FROM clips.saves s WHERE s.clip_id = c.id) AS saves,
@@ -183,6 +186,9 @@ export async function editClip(userId, clipId, f) {
   if ('trimStart' in f) add('trim_start', f.trimStart);
   if ('trimEnd' in f) add('trim_end', f.trimEnd);
   if ('accessories' in f) add('accessories', f.accessories);
+  if ('overlayText' in f) add('overlay_text', f.overlayText);
+  if ('filter' in f) add('fx_filter', f.filter);
+  if ('watermark' in f) add('watermark', f.watermark);
   if (!sets.length) return false;
   const { rowCount } = await pool.query(`UPDATE clips.clips SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2`, args);
   return rowCount > 0;

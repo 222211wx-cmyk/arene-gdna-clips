@@ -157,6 +157,13 @@
   function resetLoops() { loops = 0; $('replay').hidden = true; }
   function tryPlay() { var p = v.play(); if (p && p.catch) p.catch(function () { if (!v.muted) { v.muted = true; v.play().catch(function () { /* user taps to start */ }); } }); }   // browser blocked sound-on autoplay: play silently, icon stays open, first touch unmutes
   // loopCount: every `ended` is one finished play; after the 3rd one the chain moves to the next clip
+  var lastHist = null;
+  var FILTERS = { '': ['Aucun', ''], bw: ['Noir et blanc', 'grayscale(1)'], sepia: ['Sépia', 'sepia(.8)'], warm: ['Chaud', 'saturate(1.4) hue-rotate(-10deg)'], cool: ['Froid', 'hue-rotate(20deg) saturate(1.1)'], contrast: ['Contraste', 'contrast(1.3)'], soft: ['Doux', 'blur(1px) brightness(1.05)'] };
+  var rate = (function () { try { return parseFloat(sessionStorage.getItem('rate')) || 1; } catch (e) { return 1; } })();
+  function applyRate() { [v, buf, $('pc-v')].forEach(function (el) { try { el.playbackRate = rate; } catch (e) { /* ignore */ } }); }
+  function rememberClip(c) {
+    try { var h = JSON.parse(localStorage.getItem('hist') || '[]').filter(function (x) { return x.id !== c.id; }); h.unshift({ id: c.id, t: titleOf(c) || 'Clip' }); localStorage.setItem('hist', JSON.stringify(h.slice(0, 30))); } catch (e) { /* ignore */ }
+  }
   function startAt() { var c = cur(); return (c && c.trimStart) || 0; }
   // Couper is non-destructive: playback stays inside [trimStart, trimEnd]
   function onTrim() { if (this !== v || !shownId) return; var c = cur(); if (c && c.trimEnd && this.currentTime >= c.trimEnd) onEnded.call(this); }
@@ -173,7 +180,7 @@
     if (v.muted && !v.paused) { soundOn = true; v.muted = false; paintSound(); return; }   // first tap: sound on
     if (v.paused) { userPaused = false; tryPlay(); } else { userPaused = true; v.pause(); }
   }
-  [v, buf].forEach(function (el) { el.addEventListener('waiting', onWaiting); el.addEventListener('ended', onEnded); el.addEventListener('timeupdate', onTrim); el.addEventListener('click', onTap); });
+  [v, buf].forEach(function (el) { el.addEventListener('waiting', onWaiting); el.addEventListener('ended', onEnded); el.addEventListener('timeupdate', onTrim); el.addEventListener('playing', applyRate); el.addEventListener('click', onTap); });
   // IntersectionObserver: the clip plays only while at least half of it is on screen
   var io = 'IntersectionObserver' in window ? new IntersectionObserver(function (es) {
     es.forEach(function (en) {
@@ -231,6 +238,9 @@
     $('r-share').querySelector('[data-n]').textContent = c.shares || 0;
     var f = $('follow'); f.hidden = !!mine; f.textContent = vw.following ? 'Abonné ✓' : vw.requested ? 'Demandé' : 'Suivre'; f.classList.toggle('bg-white', !!vw.following); f.classList.toggle('text-black', !!vw.following);
     $('views-n').textContent = fmtN(c.views || 0); $('acc-ov').textContent = (c.accessories || []).join(' ');
+    $('txt-ov').textContent = c.overlayText || ''; var wm = $('wm-ov'); wm.hidden = !c.watermark; wm.textContent = '@' + ((c.author && c.author.handle) || '') + ' · Arena Clips';
+    v.style.filter = (FILTERS[c.filter || ''] || FILTERS[''])[1]; buf.style.filter = '';
+    if (c.id !== lastHist) { lastHist = c.id; rememberClip(c); }
     $('t-msg').disabled = !!mine; $('t-msg').classList.toggle('opacity-40', !!mine);
   }
   var fmtN = function (n) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace('.0', '') + ' M' : n >= 1e4 ? Math.round(n / 1e3) + ' k' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.0', '') + ' k' : String(n); };
@@ -491,21 +501,32 @@
   function toolbox() {
     var c = viewer || location.pathname === '/' ? cur() : null, mine = isMine(c), none = !c ? 'Ouvrez un clip' : '';
     var dl = c && (c.allowDownload !== false || mine);
-    openModal(head('Boîte à outils') + '<div class="flex flex-col gap-2">' + '<h3 class="mb-0 text-xs font-bold uppercase text-neutral-400">Outils du clip</h3>' +
-      tbtn('tb-del', '🗑️', 'Supprimer', c ? (mine ? 'Supprimer ce clip' : 'Réservé au propriétaire') : none, !c || !mine) +
-      tbtn('tb-cut', '✂️', 'Couper', c ? (mine ? 'Garder seulement un passage' : 'Réservé au propriétaire') : none, !c || !mine) +
-      tbtn('tb-copy', '📋', 'Copier', none || 'Copier le lien du clip', !c) +
-      tbtn('tb-acc', '✨', 'Accessoires', c ? (mine ? 'Ajouter des emojis sur le clip' : 'Réservé au propriétaire') : none, !c || !mine) +
-      tbtn('tb-desc', '📝', 'Description', c ? (mine ? 'Modifier le titre et la description' : 'Réservé au propriétaire') : none, !c || !mine) +
-      tbtn('tb-zoom', '🔍', 'Zoom', none || '100 % → 150 % → 200 %', !c) +
+    var own = function (sub) { return c ? (mine ? sub : 'Réservé au propriétaire') : none; };
+    openModal(head('Boîte à outils') + '<div class="flex flex-col gap-2">' + '<h3 class="mb-0 text-xs font-bold uppercase text-neutral-400">Éditer le clip</h3>' +
+      tbtn('tb-desc', '📝', 'Description et titre', own('Titre, description, Coller'), !c || !mine) +
+      tbtn('tb-text', '🔤', 'Texte sur le clip', own('Afficher un texte sur la vidéo'), !c || !mine) +
+      tbtn('tb-acc', '✨', 'Accessoires et emoji', own('Autocollants emoji sur le clip'), !c || !mine) +
+      tbtn('tb-fx', '🎨', 'Filtres et effets', own('Noir et blanc, sépia, chaud…'), !c || !mine) +
+      tbtn('tb-cut', '✂️', 'Couper', own('Garder seulement un passage'), !c || !mine) +
+      (c && mine ? tbtn('tb-wm', '💧', 'Watermark : ' + (c.watermark ? 'activé' : 'désactivé'), 'Toucher pour changer') : tbtn('tb-wm', '💧', 'Watermark', own(''), true)) +
+      tgroup('Lecture') +
+      tbtn('tb-speed', '⏩', 'Vitesse de lecture : ×' + rate, 'Ralentir ou accélérer') +
+      tbtn('tb-vol', soundOn ? '🔊' : '🔇', 'Son / Volume', soundOn ? 'Son activé : toucher pour couper' : 'Son coupé : toucher pour activer', !c) +
+      tbtn('tb-zoom', '🔍', 'Zoom + / − / Reset', none || '100 % → 150 % → 200 %', !c) +
       tbtn('tb-pc', '🖥️', 'Mode PC / Petit écran', none || 'Fenêtre fixe 800×450', !c) +
-      tbtn('tb-vol', soundOn ? '🔊' : '🔇', 'Volume', soundOn ? 'Son activé : toucher pour couper' : 'Son coupé : toucher pour activer', !c) +
+      tgroup('Ce clip') +
+      tbtn('tb-copy', '📋', 'Copier', none || 'Copier le lien du clip', !c) +
+      tbtn('tb-share', '🔗', 'Ouvrir / Partager', none || 'Lien, SMS, WhatsApp, partage externe', !c) +
+      tbtn('tb-save', '🔖', 'Sauvegarder', none || (c.viewer && c.viewer.saved ? 'Déjà enregistré : toucher pour retirer' : 'Garder dans vos enregistrés'), !c) +
       tbtn('tb-dl', '📥', 'Télécharger', c ? (dl ? 'Enregistrer le clip' : 'Désactivé par le propriétaire') : none, !c || !dl) +
       (mine ? tbtn('tb-dlset', '🔓', c.allowDownload !== false ? 'Téléchargement : autorisé' : 'Téléchargement : interdit', 'Toucher pour changer') : '') +
-      tbtn('tb-share', '🔗', 'Partager', none || 'Copier ou envoyer le lien', !c) +
       tbtn('tb-rep', '🚩', 'Signaler', none || 'Signaler ce clip', !c) +
-      tgroup('Profil et compte') +
-      tbtn('tb-prof', '👤', 'Profil', me ? '@' + esc(me.handle) : 'Se connecter pour voir son profil') +
+      tbtn('tb-del', '🗑️', 'Supprimer', own('Supprimer ce clip'), !c || !mine) +
+      tgroup('Mon espace') +
+      tbtn('tb-imp', '⬆️', 'Importer', 'Ajouter un clip') +
+      tbtn('tb-gal', '🖼️', 'Galerie / Gestion des clips', 'Mes clips publiés') +
+      tbtn('tb-hist', '🕘', 'Historique', 'Derniers clips vus sur cet appareil') +
+      tbtn('tb-prof', '👤', 'Profil : modifier, bio, photo', me ? '@' + esc(me.handle) : 'Se connecter pour voir son profil') +
       tbtn('tb-priv', '🔒', 'Confidentialité : ' + (me ? (me.settings.private_profile ? 'Privé' : 'Public') : 'Public / Privé'), me ? 'Toucher pour passer en ' + (me.settings.private_profile ? 'Public' : 'Privé') : 'Connexion requise') +
       tgroup('Paramètres') + settingsBox() +
       tbtn('tb-out', '🚪', me ? 'Déconnexion' : 'Connexion', me ? 'Quitter ce compte' : 'Se connecter') + '</div>');
@@ -521,6 +542,30 @@
     });
     function edit(body) { return api('PATCH', '/api/clips/' + encodeURIComponent(c.id) + '/edit', body); }
     on('tb-copy', function () { copyText(location.origin + '/c/' + encodeURIComponent(c.id)).then(function () { closeOverlay(); toast('Lien copié'); }); });
+    on('tb-wm', function () { var w = !c.watermark; edit({ watermark: w }).then(function () { c.watermark = w; closeOverlay(); paint(); toast(w ? 'Watermark activé' : 'Watermark retiré'); }).catch(fail); });
+    on('tb-text', function () {
+      openModal(head('Texte sur le clip') + '<form id="tx-f" class="flex flex-col gap-2" action="javascript:void(0)"><input id="tx-t" maxlength="80" value="' + esc(c.overlayText || '') + '" placeholder="Votre texte (80 caractères max)" aria-label="Texte" class="' + field + '"><div class="flex gap-2"><button class="' + btn + ' flex-1">Enregistrer</button><button type="button" id="tx-rm" class="' + btn2 + ' flex-1">Retirer</button></div></form>');
+      function save(t) { edit({ overlayText: t }).then(function () { c.overlayText = t; closeOverlay(); paint(); toast(t ? 'Texte ajouté' : 'Texte retiré'); }).catch(fail); }
+      $('tx-f').onsubmit = function (e) { e.preventDefault(); save($('tx-t').value.trim()); };
+      $('tx-rm').onclick = function () { save(''); };
+    });
+    on('tb-fx', function () {
+      openModal(head('Filtres et effets') + '<div class="grid grid-cols-2 gap-2">' + Object.keys(FILTERS).map(function (k) { var on = (c.filter || '') === k; return '<button data-f="' + k + '" aria-pressed="' + on + '" class="rounded-xl p-3 text-sm font-bold ' + (on ? 'bg-amber-400 text-black' : 'bg-neutral-800') + '">' + FILTERS[k][0] + '</button>'; }).join('') + '</div>');
+      modal.querySelectorAll('[data-f]').forEach(function (b) { b.onclick = function () { var k = b.dataset.f; edit({ filter: k }).then(function () { c.filter = k; closeOverlay(); paint(); toast('Filtre : ' + FILTERS[k][0]); }).catch(fail); }; });
+    });
+    on('tb-speed', function () {
+      openModal(head('Vitesse de lecture') + '<div class="grid grid-cols-3 gap-2">' + [0.5, 0.75, 1, 1.25, 1.5, 2].map(function (r) { return '<button data-r="' + r + '" class="rounded-xl p-3 text-sm font-bold ' + (r === rate ? 'bg-amber-400 text-black' : 'bg-neutral-800') + '">×' + r + '</button>'; }).join('') + '</div>');
+      modal.querySelectorAll('[data-r]').forEach(function (b) { b.onclick = function () { rate = parseFloat(b.dataset.r); try { sessionStorage.setItem('rate', String(rate)); } catch (e) { /* ignore */ } applyRate(); closeOverlay(); toast('Vitesse ×' + rate); }; });
+    });
+    on('tb-imp', function () { closeOverlay(); setTimeout(function () { $('up-open').click(); }, 80); });
+    on('tb-gal', function () { if ($('up-gal').onclick) $('up-gal').onclick(); });
+    on('tb-save', function () { $('r-save').click(); closeOverlay(); });
+    on('tb-hist', function () {
+      var h = []; try { h = JSON.parse(localStorage.getItem('hist') || '[]'); } catch (e) { /* ignore */ }
+      openModal(head('Historique') + (h.length ? '<div class="flex flex-col gap-2">' + h.map(function (x) { return '<button data-h="' + esc(x.id) + '" class="rounded-xl bg-neutral-800 p-3 text-left text-sm">' + esc(x.t) + '</button>'; }).join('') + '</div><button id="hs-clear" class="' + btn2 + ' mt-3 w-full">Effacer l’historique</button>' : '<p class="text-sm text-neutral-400">Aucun clip vu pour le moment.</p>'));
+      modal.querySelectorAll('[data-h]').forEach(function (b) { b.onclick = function () { closeOverlay(); nav('/c/' + encodeURIComponent(b.dataset.h)); }; });
+      if ($('hs-clear')) $('hs-clear').onclick = function () { try { localStorage.removeItem('hist'); } catch (e) { /* ignore */ } closeOverlay(); toast('Historique effacé'); };
+    });
     on('tb-cut', function () {
       var dur = v.duration || 0, a = c.trimStart || 0, b = c.trimEnd || dur;
       openModal(head('Couper') + '<p class="mb-3 text-sm text-neutral-300">Le clip ne joue que ce passage (secondes). L’original reste intact.</p><div class="mb-3 flex gap-2"><label class="flex-1 text-xs text-neutral-400">Début<input id="ct-a" type="number" min="0" step="0.1" value="' + a.toFixed(1) + '" class="' + field + '"></label><label class="flex-1 text-xs text-neutral-400">Fin<input id="ct-b" type="number" min="0" step="0.1" value="' + (b ? b.toFixed(1) : '') + '" class="' + field + '"></label></div><div class="flex gap-2"><button id="ct-ok" class="' + btn + ' flex-1">Enregistrer</button><button id="ct-rm" class="' + btn2 + ' flex-1">Retirer la coupe</button></div>');
@@ -537,7 +582,8 @@
       $('ac-ok').onclick = function () { edit({ accessories: sel }).then(function () { c.accessories = sel; closeOverlay(); paint(); toast('Accessoires enregistrés'); }).catch(fail); };
     });
     on('tb-desc', function () {
-      openModal(head('Description') + '<form id="ds-f" class="flex flex-col gap-2" action="javascript:void(0)"><input id="ds-t" maxlength="120" value="' + esc(c.title || '') + '" aria-label="Titre" class="' + field + '"><textarea id="ds-d" rows="5" maxlength="2000" aria-label="Description" class="' + field + '">' + esc(c.description || '') + '</textarea><button class="' + btn + '">Enregistrer</button></form>');
+      openModal(head('Description') + '<form id="ds-f" class="flex flex-col gap-2" action="javascript:void(0)"><input id="ds-t" maxlength="120" value="' + esc(c.title || '') + '" aria-label="Titre" class="' + field + '"><textarea id="ds-d" rows="5" maxlength="2000" aria-label="Description" class="' + field + '">' + esc(c.description || '') + '</textarea><button type="button" id="ds-paste" class="' + btn2 + '">Coller</button><button class="' + btn + '">Enregistrer</button></form>');
+      $('ds-paste').onclick = function () { if (!navigator.clipboard || !navigator.clipboard.readText) return toast('Collage non disponible ici'); navigator.clipboard.readText().then(function (t) { var d = $('ds-d'); d.value = (d.value ? d.value + ' ' : '') + t; }).catch(function () { toast('Collage refusé'); }); };
       $('ds-f').onsubmit = function (e) { e.preventDefault(); var t = $('ds-t').value.trim(), d = $('ds-d').value; if (!t) return toast('Le titre est requis'); edit({ title: t, description: d }).then(function () { c.title = t; c.description = d.trim(); closeOverlay(); paint(); toast('Description enregistrée'); }).catch(fail); };
     });
     on('tb-zoom', function () { closeOverlay(); setTimeout(function () { $('zoom-bar').hidden = false; zoomSet(1.5); }, 60); });
@@ -556,7 +602,10 @@
       modal.querySelectorAll('[data-w]').forEach(function (b) { b.onclick = function () { pick = b.dataset.w; modal.querySelectorAll('[data-w]').forEach(function (x) { var s = x === b; x.className = 'flex items-center justify-between rounded-xl p-3 text-left text-sm ' + (s ? 'bg-amber-400 text-black' : 'bg-neutral-800'); x.lastChild.textContent = s ? '✓' : ''; }); $('rp-go').disabled = false; }; });
       $('rp-go').onclick = function () { $('rp-go').disabled = true; api('POST', '/api/clips/' + encodeURIComponent(c.id) + '/report', { reason: pick }).then(function () { closeOverlay(); toast('Merci, signalement envoyé'); }).catch(function (e) { $('rp-go').disabled = false; $('rp-e').textContent = e.message; }); };
     });
-    on('tb-prof', function () { nav('/profile'); });
+    on('tb-prof', function () {
+      nav('/profile');
+      var tries = 0, t = setInterval(function () { var e = $('p-edit'); if (e) { clearInterval(t); e.click(); } else if (++tries > 20) clearInterval(t); }, 150);
+    });
     on('tb-priv', function () {
       if (!me) return needLogin('Connectez-vous pour choisir la confidentialité de votre profil.');
       api('PATCH', '/api/me', { private_profile: !me.settings.private_profile }).then(function (r) { me = r.user; toolbox(); toast('Profil : ' + (me.settings.private_profile ? 'Privé' : 'Public')); }).catch(fail);

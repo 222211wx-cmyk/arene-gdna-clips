@@ -49,6 +49,8 @@
   <!-- Media: real clip from R2 (poster first, then the video) -->
   <img id="poster" alt="" class="absolute inset-0 h-full w-full object-cover hidden">
   <video id="vid" class="absolute inset-0 h-full w-full object-cover" muted playsinline webkit-playsinline preload="metadata"></video>
+  <div id="txt-ov" class="pointer-events-none absolute inset-x-6 top-[58%] z-10 text-center text-2xl font-extrabold leading-tight text-white" style="text-shadow:0 2px 8px #000" aria-hidden="true"></div>
+  <div id="wm-ov" hidden class="pointer-events-none absolute right-16 z-10 text-xs font-bold text-white/60 bottom-[calc(env(safe-area-inset-bottom)+112px)]" aria-hidden="true"></div>
   <div id="acc-ov" class="pointer-events-none absolute left-1/2 top-[38%] z-10 -translate-x-1/2 whitespace-nowrap text-5xl" aria-hidden="true"></div>
   <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/60 to-transparent"></div>
   <div class="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
