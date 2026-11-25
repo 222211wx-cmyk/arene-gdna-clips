@@ -99,6 +99,36 @@ CREATE TABLE IF NOT EXISTS clips.shares (
 );
 CREATE INDEX IF NOT EXISTS shares_clip_idx ON clips.shares (clip_id);
 -- accent- and case-insensitive text for search (no extension needed)
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS bio text NOT NULL DEFAULT '';
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS city text NOT NULL DEFAULT '';
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS link text NOT NULL DEFAULT '';
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS avatar_key text;
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS cover_key text;
+CREATE TABLE IF NOT EXISTS clips.media (
+  id bigserial PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES clips.users(id) ON DELETE CASCADE,
+  kind text NOT NULL CHECK (kind IN ('photo','video')),
+  key text UNIQUE NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS media_user_idx ON clips.media (user_id, kind, created_at DESC);
+CREATE TABLE IF NOT EXISTS clips.favorites (
+  user_id uuid NOT NULL REFERENCES clips.users(id) ON DELETE CASCADE,
+  clip_id text NOT NULL REFERENCES clips.clips(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, clip_id)
+);
+ALTER TABLE clips.follows ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'accepted';
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
+ALTER TABLE clips.media ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
+ALTER TABLE clips.clips ADD COLUMN IF NOT EXISTS allow_download boolean NOT NULL DEFAULT true;
+CREATE TABLE IF NOT EXISTS clips.reports (
+  id bigserial PRIMARY KEY,
+  clip_id text NOT NULL REFERENCES clips.clips(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES clips.users(id) ON DELETE SET NULL,
+  reason text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE OR REPLACE FUNCTION clips.norm(t text) RETURNS text LANGUAGE sql IMMUTABLE AS
 $$ SELECT translate(lower(coalesce(t,'')), 'àáâãäåçèéêëìíîïñòóôõöùúûüýÿœ', 'aaaaaaceeeeiiiinooooouuuuyyo') $$;
 `;
@@ -119,7 +149,7 @@ export async function migrate() {
 export const getDefaultUserId = () => defaultUserId;
 
 const COLS = `c.id, c.key, c.poster_key, c.v720_key, c.v360_key, c.title, c.description, c.comment, c.music_id, c.music_name, c.music_artist,
-  c.enhancement, c.views, c.created_at, u.id AS author_id, u.handle, u.display_name,
+  c.enhancement, c.privacy, c.views, c.allow_download, c.created_at, u.id AS author_id, u.handle, u.display_name, u.avatar_key,
   (SELECT count(*)::int FROM clips.likes l WHERE l.clip_id = c.id) AS likes,
   (SELECT count(*)::int FROM clips.comments m WHERE m.clip_id = c.id) AS comments,
   (SELECT count(*)::int FROM clips.saves s WHERE s.clip_id = c.id) AS saves,
@@ -128,6 +158,41 @@ const COLS = `c.id, c.key, c.poster_key, c.v720_key, c.v360_key, c.title, c.desc
 // Plain-text form used for search: lowercase, no accents (mirrors clips.norm in SQL).
 export const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/œ/g, 'o').toLowerCase();
 export const tagsOf = (...t) => [...new Set((t.join(' ').match(/#[\p{L}\p{N}_]+/gu) || []).map((x) => norm(x.slice(1))))].join(' ');
+
+// Who may see a clip (alias c = clips, u = its author), for the viewer in parameter $n:
+// the owner always; a private item never anyone else; a followers-only item only accepted followers; a private profile only accepted followers.
+const accepted = (n, owner) => `EXISTS (SELECT 1 FROM clips.follows fv WHERE fv.followee_id = ${owner} AND fv.follower_id = $${n}::uuid AND fv.status = 'accepted')`;
+const visible = (n) => `(c.user_id = $${n}::uuid OR (c.privacy <> 'private' AND (NOT u.private_profile OR ${accepted(n, 'c.user_id')}) AND (c.privacy = 'public' OR ${accepted(n, 'c.user_id')})))`;
+export async function clipVisible(id, viewerId) {
+  const { rows } = await pool.query(`SELECT 1 FROM clips.clips c JOIN clips.users u ON u.id = c.user_id WHERE c.id = $1 AND ${visible(2)}`, [id, viewerId || null]);
+  return rows.length > 0;
+}
+export async function setClipPrivacy(userId, clipId, privacy) {
+  const { rowCount } = await pool.query('UPDATE clips.clips SET privacy = $3 WHERE id = $1 AND user_id = $2', [clipId, userId, privacy]);
+  return rowCount > 0;
+}
+export async function setClipDownload(userId, clipId, allow) {
+  const { rowCount } = await pool.query('UPDATE clips.clips SET allow_download = $3 WHERE id = $1 AND user_id = $2', [clipId, userId, allow]);
+  return rowCount > 0;
+}
+// Owner-only delete: returns the R2 keys to remove, or null when the clip is not the user's.
+export async function deleteClip(userId, clipId) {
+  const { rows } = await pool.query('DELETE FROM clips.clips WHERE id = $1 AND user_id = $2 RETURNING key, poster_key, v720_key, v360_key', [clipId, userId]);
+  return rows[0] ? [rows[0].key, rows[0].poster_key, rows[0].v720_key, rows[0].v360_key].filter(Boolean) : null;
+}
+// One view per call; the owner watching their own clip does not count.
+export async function addView(clipId, userId) {
+  const { rows } = await pool.query('UPDATE clips.clips SET views = views + 1 WHERE id = $1 AND user_id IS DISTINCT FROM $2::uuid RETURNING views', [clipId, userId || null]);
+  if (rows[0]) return rows[0].views;
+  return (await pool.query('SELECT views FROM clips.clips WHERE id = $1', [clipId])).rows[0]?.views ?? 0;
+}
+export async function addReport(clipId, userId, reason) {
+  await pool.query('INSERT INTO clips.reports (clip_id, user_id, reason) VALUES ($1,$2,$3)', [clipId, userId || null, reason]);
+}
+export async function setMediaPrivacy(userId, id, privacy) {
+  const { rowCount } = await pool.query('UPDATE clips.media SET privacy = $3 WHERE id = $1 AND user_id = $2', [id, userId, privacy]);
+  return rowCount > 0;
+}
 
 // Newest first; keyset pagination on (created_at, id) so pages never overlap or repeat.
 // q: every word must appear in title + caption + comment + tags + creator name/handle (accent-insensitive).
@@ -144,7 +209,7 @@ export async function feed({ limit = 10, before, q, authorHandle, viewerId } = {
     args.push(`%${w.replace(/[\\%_]/g, '\\$&')}%`);
     conds.push(`clips.norm(c.title || ' ' || c.description || ' ' || c.comment || ' ' || c.tags || ' ' || u.handle || ' ' || u.display_name) LIKE $${args.length}`);
   }
-  if (q) { args.push(viewerId || null); conds.push(`(NOT u.private_profile OR u.id = $${args.length}::uuid)`); }
+  args.push(viewerId || null); conds.push(visible(args.length));
   const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
   const { rows } = await pool.query(
     `SELECT ${COLS} FROM clips.clips c JOIN clips.users u ON u.id = c.user_id ${where}
@@ -160,14 +225,14 @@ export async function clipById(id) {
 }
 export async function upsertClip(c) {
   await pool.query(
-    `INSERT INTO clips.clips (id,user_id,key,poster_key,v720_key,v360_key,title,description,comment,music_id,music_name,music_artist,enhancement,created_at,tags)
-     VALUES ($1,$2,$3,$4,$14,$15,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::timestamptz, now()),$13)
+    `INSERT INTO clips.clips (id,user_id,key,poster_key,v720_key,v360_key,title,description,comment,music_id,music_name,music_artist,enhancement,created_at,tags, privacy)
+     VALUES ($1,$2,$3,$4,$14,$15,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::timestamptz, now()),$13,$16)
      ON CONFLICT (id) DO UPDATE SET poster_key = COALESCE(EXCLUDED.poster_key, clips.clips.poster_key),
        v720_key = COALESCE(EXCLUDED.v720_key, clips.clips.v720_key), v360_key = COALESCE(EXCLUDED.v360_key, clips.clips.v360_key),
        title = EXCLUDED.title, description = EXCLUDED.description, comment = EXCLUDED.comment,
        music_id = EXCLUDED.music_id, music_name = EXCLUDED.music_name, music_artist = EXCLUDED.music_artist,
-       enhancement = EXCLUDED.enhancement, tags = EXCLUDED.tags`,
-    [c.id, c.userId, c.key, c.posterKey || null, c.title, c.description, c.comment, c.musicId, c.musicName, c.musicArtist, JSON.stringify(c.enhancement || {}), c.createdAt || null, tagsOf(c.title, c.description, c.comment), c.v720Key || null, c.v360Key || null]);
+       enhancement = EXCLUDED.enhancement, tags = EXCLUDED.tags, privacy = EXCLUDED.privacy`,
+    [c.id, c.userId, c.key, c.posterKey || null, c.title, c.description, c.comment, c.musicId, c.musicName, c.musicArtist, JSON.stringify(c.enhancement || {}), c.createdAt || null, tagsOf(c.title, c.description, c.comment), c.v720Key || null, c.v360Key || null, c.privacy || 'public']);
   return clipById(c.id);
 }
 export async function knownKeys() {
@@ -184,12 +249,12 @@ const checkPw = (pw, stored) => {
   const a = Buffer.from(h, 'hex'), b = crypto.scryptSync(pw, salt, 64);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
-const USER_COLS = 'id, handle, display_name, email, notifications, private_profile, allow_messages, language, created_at';
-export async function signup({ email, username, password }) {
+const USER_COLS = 'id, handle, display_name, bio, city, link, avatar_key, cover_key, email, notifications, private_profile, allow_messages, language, created_at';
+export async function signup({ email, username, name, password }) {
   try {
     const { rows } = await pool.query(
-      `INSERT INTO clips.users (handle, display_name, email, password_hash) VALUES ($1,$1,$2,$3) RETURNING ${USER_COLS}`,
-      [username, email, hashPw(password)]);
+      `INSERT INTO clips.users (handle, display_name, email, password_hash) VALUES ($1,$2,$3,$4) RETURNING ${USER_COLS}`,
+      [username, name || username, email, hashPw(password)]);
     return { user: rows[0] };
   } catch (e) {
     if (e.code === '23505') return { error: /email/.test(e.constraint || e.detail || '') ? 'email' : 'username' };
@@ -225,17 +290,49 @@ export async function userBySession(token) {
 }
 export const endSession = (token) => pool.query('DELETE FROM clips.sessions WHERE token_hash = $1', [sha(token || '')]);
 export async function updateSettings(userId, s) {
-  const { rows } = await pool.query(
-    `UPDATE clips.users SET notifications = COALESCE($2, notifications), private_profile = COALESCE($3, private_profile),
-       allow_messages = COALESCE($4, allow_messages), display_name = COALESCE($5, display_name), language = 'fr'
-     WHERE id = $1 RETURNING ${USER_COLS}`, [userId, s.notifications ?? null, s.private_profile ?? null, s.allow_messages ?? null, s.display_name ?? null]);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE clips.users SET notifications = COALESCE($2, notifications), private_profile = COALESCE($3, private_profile),
+         allow_messages = COALESCE($4, allow_messages), display_name = COALESCE($5, display_name), language = 'fr',
+         handle = COALESCE($6, handle), bio = COALESCE($7, bio), city = COALESCE($8, city), link = COALESCE($9, link),
+         avatar_key = COALESCE($10, avatar_key), cover_key = COALESCE($11, cover_key)
+       WHERE id = $1 RETURNING ${USER_COLS}`,
+      [userId, s.notifications ?? null, s.private_profile ?? null, s.allow_messages ?? null, s.display_name ?? null,
+        s.handle ?? null, s.bio ?? null, s.city ?? null, s.link ?? null, s.avatar_key ?? null, s.cover_key ?? null]);
+    if (s.private_profile === false) await pool.query("UPDATE clips.follows SET status = 'accepted' WHERE followee_id = $1 AND status = 'pending'", [userId]);
+    return { user: rows[0] };
+  } catch (e) { if (e.code === '23505') return { error: 'username' }; throw e; }
+}
+export async function addMedia(userId, kind, key, privacy = 'public') {
+  const { rows } = await pool.query('INSERT INTO clips.media (user_id, kind, key, privacy) VALUES ($1,$2,$3,$4) ON CONFLICT (key) DO NOTHING RETURNING id, kind, key, privacy, created_at', [userId, kind, key, privacy]);
   return rows[0];
 }
+export async function listMedia(userId, kind, viewerId) {
+  const own = viewerId === userId;
+  const { rows } = await pool.query(`SELECT m.id, m.kind, m.key, m.privacy, m.created_at FROM clips.media m WHERE m.user_id = $1 AND m.kind = $2
+    AND ($3::boolean OR m.privacy = 'public' OR (m.privacy = 'followers' AND ${accepted(4, '$1::uuid')})) ORDER BY m.created_at DESC, m.id DESC LIMIT 200`, [userId, kind, own, viewerId || null]);
+  return rows;
+}
+export async function deleteMedia(userId, id) {
+  const { rows } = await pool.query('DELETE FROM clips.media WHERE id = $1 AND user_id = $2 RETURNING key', [id, userId]);
+  return rows[0]?.key || null;
+}
+export async function setFavorite(userId, clipId, on) {
+  await pool.query(on
+    ? 'INSERT INTO clips.favorites (user_id, clip_id) VALUES ($1,$2) ON CONFLICT DO NOTHING'
+    : 'DELETE FROM clips.favorites WHERE user_id = $1 AND clip_id = $2', [userId, clipId]);
+  return { on };
+}
 // Deletes the account and everything it owns; returns the R2 keys to remove.
+export async function passwordOk(userId, password) {
+  const { rows } = await pool.query('SELECT password_hash FROM clips.users WHERE id = $1', [userId]);
+  return !!rows[0] && checkPw(String(password || ''), rows[0].password_hash);
+}
 export async function deleteAccount(userId, password) {
   const { rows } = await pool.query('SELECT password_hash FROM clips.users WHERE id = $1', [userId]);
   if (!rows[0] || !checkPw(password, rows[0].password_hash)) return null;
   const k = await pool.query('SELECT key, poster_key, v720_key, v360_key FROM clips.clips WHERE user_id = $1', [userId]);
+  const mk = await pool.query('SELECT key FROM clips.media WHERE user_id = $1 UNION SELECT avatar_key FROM clips.users WHERE id = $1 UNION SELECT cover_key FROM clips.users WHERE id = $1', [userId]);
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
@@ -243,7 +340,7 @@ export async function deleteAccount(userId, password) {
     await c.query('DELETE FROM clips.users WHERE id = $1', [userId]);
     await c.query('COMMIT');
   } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
-  return k.rows.flatMap((r) => [r.key, r.poster_key, r.v720_key, r.v360_key]).filter(Boolean);
+  return k.rows.flatMap((r) => [r.key, r.poster_key, r.v720_key, r.v360_key]).concat(mk.rows.map((r) => r.key)).filter(Boolean);
 }
 // Per-clip state for one viewer: liked / saved / following the author.
 export async function viewerState(userId, ids) {
@@ -253,9 +350,11 @@ export async function viewerState(userId, ids) {
     `SELECT c.id,
        EXISTS (SELECT 1 FROM clips.likes l WHERE l.clip_id = c.id AND l.user_id = $1) AS liked,
        EXISTS (SELECT 1 FROM clips.saves s WHERE s.clip_id = c.id AND s.user_id = $1) AS saved,
-       EXISTS (SELECT 1 FROM clips.follows f WHERE f.followee_id = c.user_id AND f.follower_id = $1) AS following
+       EXISTS (SELECT 1 FROM clips.follows f WHERE f.followee_id = c.user_id AND f.follower_id = $1 AND f.status = 'accepted') AS following,
+       (SELECT f.status FROM clips.follows f WHERE f.followee_id = c.user_id AND f.follower_id = $1) AS follow_status,
+       EXISTS (SELECT 1 FROM clips.favorites v WHERE v.clip_id = c.id AND v.user_id = $1) AS favorited
      FROM clips.clips c WHERE c.id = ANY($2::text[])`, [userId, ids]);
-  rows.forEach((r) => { out[r.id] = { liked: r.liked, saved: r.saved, following: r.following }; });
+  rows.forEach((r) => { out[r.id] = { liked: r.liked, saved: r.saved, following: r.following, requested: r.follow_status === 'pending', favorited: r.favorited }; });
   return out;
 }
 const count = async (table, clipId) => (await pool.query(`SELECT count(*)::int AS n FROM clips.${table} WHERE clip_id = $1`, [clipId])).rows[0].n;
@@ -286,28 +385,44 @@ export async function addComment(userId, clipId, body) {
     `INSERT INTO clips.comments (clip_id, user_id, body) VALUES ($1,$2,$3) RETURNING id, body, created_at`, [clipId, userId, body]);
   return { ...rows[0], name: 'Moi', count: await count('comments', clipId) };
 }
+// Following a private profile only sends a request (status 'pending') that the owner accepts or declines.
 export async function setFollow(userId, authorId, on) {
   if (userId === authorId) return { error: 'self' };
-  await pool.query(on
-    ? 'INSERT INTO clips.follows (follower_id, followee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING'
-    : 'DELETE FROM clips.follows WHERE follower_id = $1 AND followee_id = $2', [userId, authorId]);
-  const { rows } = await pool.query('SELECT count(*)::int AS n FROM clips.follows WHERE followee_id = $1', [authorId]);
-  return { on, followers: rows[0].n };
+  let status = null;
+  if (on) {
+    const t = await pool.query('SELECT private_profile FROM clips.users WHERE id = $1', [authorId]);
+    status = t.rows[0]?.private_profile ? 'pending' : 'accepted';
+    await pool.query("INSERT INTO clips.follows (follower_id, followee_id, status) VALUES ($1,$2,$3) ON CONFLICT (follower_id, followee_id) DO NOTHING", [userId, authorId, status]);
+    const cur = await pool.query('SELECT status FROM clips.follows WHERE follower_id = $1 AND followee_id = $2', [userId, authorId]); status = cur.rows[0].status;
+  } else await pool.query('DELETE FROM clips.follows WHERE follower_id = $1 AND followee_id = $2', [userId, authorId]);
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM clips.follows WHERE followee_id = $1 AND status = 'accepted'", [authorId]);
+  return { on, status, followers: rows[0].n };
+}
+export async function pendingRequests(userId) {
+  const { rows } = await pool.query("SELECT u.handle, u.display_name AS name FROM clips.follows f JOIN clips.users u ON u.id = f.follower_id WHERE f.followee_id = $1 AND f.status = 'pending' ORDER BY f.created_at DESC LIMIT 100", [userId]);
+  return rows;
+}
+export async function answerRequest(ownerId, handle, accept) {
+  const u = await pool.query('SELECT id FROM clips.users WHERE handle = $1', [handle]); if (!u.rows[0]) return false;
+  const r = accept
+    ? await pool.query("UPDATE clips.follows SET status = 'accepted' WHERE follower_id = $1 AND followee_id = $2 AND status = 'pending'", [u.rows[0].id, ownerId])
+    : await pool.query("DELETE FROM clips.follows WHERE follower_id = $1 AND followee_id = $2 AND status = 'pending'", [u.rows[0].id, ownerId]);
+  return r.rowCount > 0;
 }
 export async function citizen(handle, viewerId) {
   const { rows } = await pool.query(
-    `SELECT u.id, u.handle, u.display_name, u.private_profile, u.allow_messages, extract(year FROM u.created_at)::int AS year,
+    `SELECT u.id, u.handle, u.display_name, u.bio, u.city, u.link, u.avatar_key, u.cover_key, u.private_profile, u.allow_messages, extract(year FROM u.created_at)::int AS year,
        (SELECT count(*)::int FROM clips.users o WHERE (o.created_at, o.id) <= (u.created_at, u.id)) AS seq,
        (SELECT count(*)::int FROM clips.clips c WHERE c.user_id = u.id) AS clips,
-       (SELECT count(*)::int FROM clips.follows f WHERE f.followee_id = u.id) AS followers,
-       (SELECT count(*)::int FROM clips.follows f WHERE f.follower_id = u.id) AS following,
-       EXISTS (SELECT 1 FROM clips.follows f WHERE f.followee_id = u.id AND f.follower_id = $2) AS followed
+       (SELECT count(*)::int FROM clips.follows f WHERE f.followee_id = u.id AND f.status = 'accepted') AS followers,
+       (SELECT count(*)::int FROM clips.follows f WHERE f.follower_id = u.id AND f.status = 'accepted') AS following,
+       (SELECT f.status FROM clips.follows f WHERE f.followee_id = u.id AND f.follower_id = $2) AS follow_status
      FROM clips.users u WHERE u.handle = $1`, [handle, viewerId || null]);
   return rows[0] || null;
 }
 export async function followers(userId) {
   const { rows } = await pool.query(
-    `SELECT u.handle, u.display_name AS name FROM clips.follows f JOIN clips.users u ON u.id = f.follower_id WHERE f.followee_id = $1 ORDER BY f.created_at DESC LIMIT 200`, [userId]);
+    `SELECT u.handle, u.display_name AS name FROM clips.follows f JOIN clips.users u ON u.id = f.follower_id WHERE f.followee_id = $1 AND f.status = 'accepted' ORDER BY f.created_at DESC LIMIT 200`, [userId]);
   return rows;
 }
 export async function setFollowUser(userId, targetId, on) { return setFollow(userId, targetId, on); }
@@ -342,7 +457,7 @@ export async function unreadCount(userId) {
 export async function savedClips(userId) {
   const { rows } = await pool.query(
     `SELECT ${COLS} FROM clips.saves sv JOIN clips.clips c ON c.id = sv.clip_id JOIN clips.users u ON u.id = c.user_id
-     WHERE sv.user_id = $1 ORDER BY sv.created_at DESC LIMIT 60`, [userId]);
+     WHERE sv.user_id = $1 AND ${visible(1)} ORDER BY sv.created_at DESC LIMIT 60`, [userId]);
   return rows;
 }
 export async function backfillTags() {

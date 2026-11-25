@@ -3,7 +3,7 @@
 <head>
 <meta name="build-id" content="{{BUILD_ID}}">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>{{BRAND_NAME}}</title>
 <meta property="og:title" content="{{OG_TITLE}}">
 <meta property="og:site_name" content="{{BRAND_NAME}}">
@@ -22,7 +22,8 @@
   .txs{text-shadow:0 1px 4px rgba(0,0,0,.8)}
   .ico svg{width:100%;height:100%}
   .rail-btn.on svg{fill:#ff2d55;stroke:#ff2d55}
-  .rail-btn.saved svg{fill:#FFD700;stroke:#FFD700}
+  .rail-btn.saved svg,.rail-btn.fav svg{fill:#FFD700;stroke:#FFD700}
+  #l-rail{position:fixed;z-index:30;left:max(12px,calc(50vw - 240px + 12px));top:calc(env(safe-area-inset-top) + 166px)}
   .tab.active{color:#fbbf24}.tab{color:rgba(255,255,255,.65)}
   svg.lucide{stroke-width:2}
   .glass{background:rgba(20,20,20,.65);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -36,6 +37,8 @@
   #hdr.bare #search-form{display:none}
   #hdr{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:480px;z-index:9999}
   #phone{height:var(--vh,100dvh)}
+  #page{padding-top:60px!important}
+  #vid,#vid2{transform-origin:center center}
   .invisible{visibility:hidden}
 </style>
 </head>
@@ -67,6 +70,8 @@
       <button id="up-open" aria-label="Importer" class="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-amber-400 px-3 text-sm font-bold text-black"><i data-lucide="upload" class="h-4 w-4"></i>Importer</button>
     </div>
   </header>
+  <!-- Toolbox button: directly under Home -->
+  <button id="b-tools" aria-label="Boîte à outils" title="Boîte à outils" class="absolute left-[54px] top-[calc(env(safe-area-inset-top)+118px)] z-[50] flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="ellipsis-vertical" class="h-5 w-5"></i></button>
   <button id="r-snd" aria-label="Son" class="rail-btn absolute right-3 top-[calc(env(safe-area-inset-top)+112px)] z-[30] flex h-9 w-9 items-center justify-center rounded-full bg-black/45"><i data-lucide="volume-x" class="h-5 w-5"></i></button>
   <button id="replay" hidden aria-label="Revoir" class="absolute left-1/2 top-[42%] z-[30] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-black/70 px-6 py-3 text-base font-extrabold ring-1 ring-white/40"><i data-lucide="rotate-ccw" class="h-5 w-5"></i>Revoir</button>
 
@@ -76,6 +81,14 @@
     <button id="r-comment" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Commentaires"><i data-lucide="message-circle" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
     <button id="r-share" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Partager"><i data-lucide="share-2" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
     <button id="r-save" class="rail-btn flex w-11 flex-col items-center gap-0.5" aria-label="Enregistrer"><i data-lucide="bookmark" class="h-6 w-6"></i><span class="text-[11px] font-bold txs" data-n>0</span></button>
+  </aside>
+
+  <!-- Left rail, vertical, above the creator avatar: EQ avatar (my profile), Settings, Title/Caption, Favorite -->
+  <aside id="l-rail" class="flex flex-col items-center gap-3">
+    <button id="l-eq" aria-label="Mon profil" class="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-sm font-extrabold text-black shadow-lg"><span id="l-eq-t">EQ</span></button>
+    <button id="l-set" aria-label="Paramètres" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="settings" class="h-5 w-5"></i></button>
+    <button id="l-cap" aria-label="Titre et légende" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="type" class="h-5 w-5"></i></button>
+    <button id="l-fav" aria-label="Favori" aria-pressed="false" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="star" class="h-5 w-5"></i></button>
   </aside>
 
   <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
@@ -94,6 +107,17 @@
     <button id="t-card" aria-label="Citizen Card" title="Citizen Card" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="id-card" class="h-[18px] w-[18px]"></i></button>
     <button id="t-msg" aria-label="Message" title="Message" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="send" class="h-[18px] w-[18px]"></i></button>
     <button id="t-ai" aria-label="Ask AI" title="Ask AI" class="flex h-9 w-9 items-center justify-center rounded-full bg-black/45 ring-1 ring-white/20"><i data-lucide="sparkles" class="h-[18px] w-[18px] text-gold"></i></button>
+  </div>
+
+  <!-- Views: real count from the database, bottom-right above Profil -->
+  <div id="views" class="absolute right-3 z-20 flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-xs font-bold ring-1 ring-white/20 bottom-[calc(env(safe-area-inset-bottom)+76px)]" aria-label="Vues"><span aria-hidden="true">👁️</span><span id="views-n">0</span></div>
+  <!-- Zoom bar (opened from the Toolbox) -->
+  <div id="zoom-bar" hidden class="absolute left-1/2 z-[55] flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/80 px-3 py-2 ring-1 ring-white/30 bottom-[calc(env(safe-area-inset-bottom)+130px)]">
+    <button id="z-out" aria-label="Zoom moins" class="h-10 w-10 rounded-full bg-white/15 text-xl font-bold">−</button>
+    <span id="z-v" class="w-12 text-center text-sm font-bold">100%</span>
+    <button id="z-in" aria-label="Zoom plus" class="h-10 w-10 rounded-full bg-white/15 text-xl font-bold">+</button>
+    <button id="z-reset" class="h-10 rounded-full bg-amber-400 px-3 text-sm font-extrabold text-black">Reset</button>
+    <button id="z-x" aria-label="Fermer le zoom" class="h-10 w-10 rounded-full bg-white/15">✕</button>
   </div>
 
   <nav class="absolute inset-x-0 bottom-0 z-40 flex h-[calc(64px+env(safe-area-inset-bottom))] items-start border-t border-white/10 bg-black/70 pb-[env(safe-area-inset-bottom)] backdrop-blur">
@@ -158,6 +182,10 @@
         </div>
         <div class="ai-ask"><input id="ai-q" placeholder="Demandez à l'IA…"><button id="ai-mic" title="Dictée vocale">🎤</button><button id="ai-send" title="Envoyer">➤</button></div>
       </div>
+      <div class="st-lbl">Visibilité</div>
+      <select id="st-priv" aria-label="Visibilité" style="width:100%;padding:12px;border-radius:12px;background:#262626;color:#fff;border:1px solid #404040;font-size:15px">
+        <option value="public">Public</option><option value="followers">Abonnés uniquement</option><option value="private">Privé (moi seulement)</option>
+      </select>
       <button class="st-pub" id="st-pub">Publier</button>
     </div>
     <div class="up-track"><div id="up-bar"></div></div>
@@ -166,6 +194,13 @@
   </div>
 </div>
 
+<!-- Mode PC: fixed 800x450 window (outside the phone column) -->
+<div id="pc-back" hidden class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70">
+  <div id="pc-win" class="relative overflow-hidden rounded-xl bg-black shadow-2xl ring-1 ring-white/30" style="width:min(800px,calc(100vw - 16px));height:min(450px,calc((100vw - 16px) * 9 / 16 + 44px));max-height:calc(100vh - 16px)">
+    <div class="flex h-11 items-center justify-between bg-neutral-900 px-3 text-sm font-bold"><span id="pc-t" class="truncate"></span><button id="pc-x" aria-label="Fermer" class="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800">✕</button></div>
+    <video id="pc-v" controls playsinline loop class="block w-full bg-black" style="height:calc(100% - 44px)"></video>
+  </div>
+</div>
 <script defer src="/app.js?v={{BUILD_ID}}"></script>
 <script type="module" src="/upload.js?v={{BUILD_ID}}"></script>
 </body>
