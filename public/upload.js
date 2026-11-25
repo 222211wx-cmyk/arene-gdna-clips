@@ -162,7 +162,7 @@ $('st-pub').onclick = async () => {
     setProgress('Miniature…', 100);
     const poster = await uploadPoster(file, key);
     setProgress('Compression 720p + 360p…', 100);
-    const rec = await api('/publish', {
+    const rec = await publish({
       key, title, description: $('st-desc').value, comment: $('st-comment').value,
       musicId: music ? music.id : null, enhancement: { ...st.fx }, poster, filter: st.filter, privacy: $('st-priv').value,
       trim: st.dur && (st.t0 > 0.05 || st.t1 < st.dur - 0.05) ? { start: st.t0, end: st.t1 } : null,
@@ -287,12 +287,23 @@ async function importArchive(file) {
       setProgress(`Publication ${++n}/${job.clips.length}…`, 100);
       const t = c.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
       const title = t.length >= 2 && !CAMERA.test(t) ? t.slice(0, 120) : `Clip importé ${n}`;
-      const rec = await api('/publish', { key: c.key, title, description: '', comment: '', musicId: null, enhancement: {}, poster: false, filter: '', privacy: 'public', trim: null });
+      const rec = await publish({ key: c.key, title, description: '', comment: '', musicId: null, enhancement: {}, poster: false, filter: '', privacy: 'public', trim: null });
       if (n === 1) showClip(rec);
     }
     setProgress(`✅ ${job.clips.length} vidéo(s) publiée(s)`, 100);
   } catch (err) { console.error(err); setProgress('❌ ' + err.message + ' — choisissez la même archive pour reprendre', 0); }
   finally { busy = false; }
+}
+
+// Publish = compression on the server (minutes for a big file): start the job, then poll it. Never bound by a request timeout.
+async function publish(body) {
+  const { id } = await retry(() => api('/publish', body));
+  for (;;) {
+    await sleep(2000);
+    const j = await retry(() => api('/publish/' + id));
+    if (j.step === 'error') throw new Error(j.error);
+    if (j.step === 'done') return j.clip;
+  }
 }
 
 function putPart(url, chunk, contentType, onBytes, cacheControl) {

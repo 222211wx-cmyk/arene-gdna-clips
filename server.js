@@ -182,7 +182,7 @@ api.post('/extract', wrap(async (req, res) => {
   jobChain = jobChain.then(run);
   res.json({ id });
 }));
-api.get('/extract/:id', (req, res) => {
+api.get(['/extract/:id', '/publish/:id'], (req, res) => {
   const j = jobs.get(req.params.id);
   if (!j || j.userId !== req.user?.id) return res.status(404).json({ error: 'tâche introuvable (le serveur a redémarré ? réessayez)' });
   res.json(j);
@@ -469,15 +469,20 @@ api.post('/publish', needDb, needUser, wrap(async (req, res) => {
   if (poster) { try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: posterKey(key) })); pk = posterKey(key); } catch {} }
   const tr = trim && Number.isFinite(+trim.start) && Number.isFinite(+trim.end) && +trim.start >= 0 && +trim.end - +trim.start >= 1 ? { start: +trim.start, end: +trim.end } : null;
   if (filter && !FILTERS[filter]) return res.status(400).json({ error: 'filtre inconnu' });
-  let rend;
-  try { rend = await transcode({ s3, bucket: R2_BUCKET, key, id: idOf(key), trim: tr, filter }); }
-  catch (e) { console.error('[transcode]', e.message); return res.status(500).json({ error: 'Compression de la vidéo impossible : ' + e.message.slice(0, 160) }); }
-  const row = await upsertClip({
-    id: idOf(key), userId: req.user.id, key, posterKey: pk, v720Key: rend.v720, v360Key: rend.v360, title: String(title).trim().slice(0, 120),
-    description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
-    privacy, musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
-  });
-  res.json((await presentAll(req, [row]))[0]);
+  // Compression can take minutes on a big file: run it as a background job; the client polls /publish/:id (same job map as /extract).
+  const id = crypto.randomBytes(8).toString('hex');
+  const job = { id, userId: req.user.id, step: 'compress', pct: 0 };
+  jobs.set(id, job); setTimeout(() => jobs.delete(id), 6 * 3600 * 1000).unref();
+  (async () => {
+    const rend = await transcode({ s3, bucket: R2_BUCKET, key, id: idOf(key), trim: tr, filter });
+    const row = await upsertClip({
+      id: idOf(key), userId: req.user.id, key, posterKey: pk, v720Key: rend.v720, v360Key: rend.v360, title: String(title).trim().slice(0, 120),
+      description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
+      privacy, musicId, musicName: music?.name || null, musicArtist: music?.artist || null, enhancement: fx,
+    });
+    Object.assign(job, { step: 'done', pct: 100, clip: (await presentAll(req, [row]))[0] });
+  })().catch((e) => { console.error('[publish]', e.message); Object.assign(job, { step: 'error', error: 'Compression de la vidéo impossible : ' + e.message.slice(0, 160) }); });
+  res.json({ id });
 }));
 
 api.post('/upload/abort', wrap(async (req, res) => {
