@@ -1237,6 +1237,73 @@
     },
   };
 
+  /* ================= "•••" options panel (native DOM): Supprimer first, then the rest ================= */
+  (function () {
+    var KEY = 'arena-clips:more', panel = null;
+    var S = { brightness: 100, contrast: 100, saturation: 100, muteOriginal: false, music: '', voice: false };
+    try { var sv = JSON.parse(localStorage.getItem(KEY) || '{}'); for (var k in sv) if (k in S) S[k] = sv[k]; } catch (e) { /* ignore */ }
+    var save = function () { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } };
+    function fx() { v.style.filter = (S.brightness === 100 && S.contrast === 100 && S.saturation === 100) ? '' : 'brightness(' + S.brightness + '%) contrast(' + S.contrast + '%) saturate(' + S.saturation + '%)'; }
+    fx();
+    function el(tag, css, text) { var e = document.createElement(tag); if (css) e.style.cssText = css; if (text != null) e.textContent = text; return e; }
+    function close() { if (panel) { panel.remove(); panel = null; } }
+    // run an action of the Toolbox (same permissions, same API calls) without depending on how it is drawn
+    function viaToolbox(id, why) {
+      close(); toolbox();
+      var b = $(id);
+      if (!b || b.disabled) { closeOverlay(); toast(why || 'Indisponible : ouvrez un clip'); return; }
+      b.click();
+    }
+    function viaSub(k) { close(); setSub(k, closeOverlay); }
+    var ROW = 'display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:14px 16px;border:0;border-bottom:1px solid #f1f1f1;background:none;color:#111;font:inherit;font-size:15px;text-align:left;cursor:pointer';
+    function open() {
+      if (panel) return;
+      panel = el('aside', 'position:fixed;top:0;right:0;width:320px;max-width:100%;height:100%;overflow-y:auto;z-index:9999;background:white;color:#111;font-family:system-ui,sans-serif;box-shadow:-4px 0 24px rgba(0,0,0,.45)');
+      panel.id = 'more-panel'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Options');
+      var head = el('div', 'display:flex;align-items:center;justify-content:space-between;padding:14px 16px;position:sticky;top:0;background:white;border-bottom:1px solid #eee;z-index:1');
+      var x = el('button', 'border:0;background:none;font-size:18px;cursor:pointer;padding:4px 10px;color:#111', 'X'); x.setAttribute('aria-label', 'Fermer'); x.onclick = close;
+      head.appendChild(el('strong', '', 'Options')); head.appendChild(x); panel.appendChild(head);
+      function row(emoji, label, fn, red) { var b = el('button', ROW + (red ? ';color:#d00000;font-weight:700' : ''), emoji + ' ' + label); b.type = 'button'; b.onclick = fn; panel.appendChild(b); return b; }
+      function group(emoji, label, build) { var a = el('div', 'padding:8px 16px 12px;background:#fafafa;border-bottom:1px solid #f1f1f1;display:flex;flex-direction:column;gap:10px'); a.hidden = true; build(a); row(emoji, label, function () { a.hidden = !a.hidden; }); panel.appendChild(a); }
+      function btn(t, fn) { var b = el('button', 'padding:7px 12px;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#111;font:inherit;cursor:pointer', t); b.type = 'button'; b.onclick = fn; return b; }
+      function slider(a, label, key) {
+        var w = el('label', 'display:flex;flex-direction:column;gap:2px;font-size:13px'), t = el('span'), r = el('input');
+        var paint = function () { t.textContent = label + ' : ' + S[key] + '%'; }; paint();
+        r.type = 'range'; r.min = 50; r.max = 150; r.value = S[key];
+        r.oninput = function () { S[key] = +r.value; paint(); save(); fx(); };
+        w.appendChild(t); w.appendChild(r); a.appendChild(w);
+      }
+      function toggle(a, label, key, after) {
+        var b = el('button', 'display:flex;justify-content:space-between;width:100%;padding:8px 0;border:0;background:none;color:#111;font:inherit;cursor:pointer'), s = el('b');
+        var paint = function () { s.textContent = S[key] ? 'ON' : 'OFF'; }; paint();
+        b.appendChild(el('span', '', label)); b.appendChild(s);
+        b.onclick = function () { S[key] = !S[key]; paint(); save(); if (after) after(); }; a.appendChild(b);
+      }
+      var cn = function () { return cur(); };
+      row('🗑️', 'SUPPRIMER', function () { viaToolbox('tb-del', 'Suppression réservée au propriétaire du clip'); }, true);
+      row('💾', 'Enregistrer', function () { viaToolbox('tb-save'); });
+      row('🔗', 'Copier lien', function () { var c = cn(); if (!c) { toast('Ouvrez un clip'); return; } copyText(location.origin + '/c/' + encodeURIComponent(c.id)).then(function () { toast('Lien copié'); }); });
+      row('📤', 'Partager', function () { var c = cn(); if (!c) { toast('Ouvrez un clip'); return; } close(); $('r-share').onclick(); });
+      row('🔍', 'Zoom (+ / −)', function () { if (!cn()) { toast('Ouvrez un clip'); return; } close(); $('zoom-bar').hidden = false; zoomSet(1.5); });
+      group('💡', 'Éclairage', function (a) { slider(a, 'Luminosité', 'brightness'); slider(a, 'Contraste', 'contrast'); slider(a, 'Saturation', 'saturation'); a.appendChild(btn('Réinitialiser', function () { S.brightness = S.contrast = S.saturation = 100; save(); fx(); close(); open(); })); });
+      row('🎨', 'Filtres / Accessoires', function () { viaToolbox('tb-fx', 'Réservé au propriétaire du clip'); });
+      group('🎵', 'Audio', function (a) {
+        toggle(a, 'Supprimer Audio Original', 'muteOriginal', function () { setSound(!S.muteOriginal); });
+        var m = el('input', 'padding:8px;border:1px solid #ccc;border-radius:8px;font:inherit;color:#111'); m.type = 'text'; m.placeholder = 'Musique (titre ou lien)'; m.value = S.music;
+        m.onchange = function () { S.music = m.value.trim(); save(); toast('Musique enregistrée'); }; a.appendChild(m);
+        toggle(a, 'Commentaire Vocal', 'voice');
+      });
+      group('⚙️', 'Réglage Vidéo', function (a) { a.appendChild(btn('Cut : couper le clip', function () { viaToolbox('tb-cut', 'Réservé au propriétaire du clip'); })); a.appendChild(btn('Qualité vidéo', function () { viaSub('quality'); })); });
+      row('🌐', 'Langue', function () { close(); $('b-lang').click(); });
+      row('🔔', 'Notifications', function () { viaSub('notif'); });
+      row('👤', 'Compte', function () { viaSub('account'); });
+      row('🚩', 'Signaler', function () { viaToolbox('tb-rep'); });
+      row('🆘', 'Aide', function () { viaSub('help'); });
+      document.body.appendChild(panel);
+    }
+    $('r-more').onclick = function (e) { e.stopPropagation(); open(); };   // opens with or without an active clip
+  })();
+
   /* boot */
   Promise.all([refreshMe(), loadFeed()]).then(function () { ready = true; render(); icons(); });
   window.addEventListener('load', icons);
