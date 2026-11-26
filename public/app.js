@@ -25,7 +25,7 @@
   })();
 
   // /arena-clips opens the same feed as / (direct link to Arena Clips)
-  var PATHN = function () { return location.pathname.replace(/^\/arena-clips(?=\/|$)/, '') || '/'; };
+  var PATHN = function () { return location.pathname.replace(/^\/arena-clips(?=\/|$)/i, '') || '/'; };
   var SITE = (document.querySelector('meta[name=arena-site]') || {}).content || 'https://gdnaarena.app/';
 
   /* ================= helpers ================= */
@@ -1068,6 +1068,8 @@
   /* chrome: Home, logo, back, close, bottom nav */
   $('b-home').onclick = function () { nav('/'); };
   $('logo').onclick = function () { location.href = SITE; };   // the GDNA ARENA logo leads to the full official site
+  // fixed tab title: always shown and active; already on /Arena-Clips it stays on the tab, otherwise it opens gdnaarena.app/Arena-Clips
+  $('tab-clips').onclick = function () { if (/^\/arena-clips(\/|$)/i.test(location.pathname)) { /* already on the tab: stay */ } else location.href = SITE.replace(/\/?$/, '/') + 'Arena-Clips'; };
   $('b-lang').onclick = languagePicker;
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
