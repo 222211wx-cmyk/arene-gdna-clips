@@ -840,6 +840,8 @@
     dock(); addEventListener('resize', dock); setInterval(dock, 500);
   })();
   $('b-set').onclick = settingsModal;
+  // Trash sits right under Profil (left); same flow as the panel's Supprimer: owner-only, asks to confirm
+  $('l-del').onclick = function () { toolbox(); var b = $('tb-del'); if (!b || b.disabled) { closeOverlay(); toast('Suppression réservée au propriétaire du clip'); return; } b.click(); };
 
   // after a delete: drop the clip everywhere and go to the next one (or back to the feed when none is left)
   function afterDelete(c) {
