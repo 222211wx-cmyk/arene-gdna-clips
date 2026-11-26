@@ -1240,11 +1240,9 @@
   /* ================= top-left ⋮ button: ONE native-DOM panel with everything ================= */
   (function () {
     var KEY = 'arena-clips:more', panel = null;
-    var S = { brightness: 100, contrast: 100, saturation: 100, muteOriginal: false, music: '', voice: false, syncAi: false };
+    var S = { muteOriginal: false, voice: false, syncAi: false };
     try { var sv = JSON.parse(localStorage.getItem(KEY) || '{}'); for (var k in sv) if (k in S) S[k] = sv[k]; } catch (e) { /* ignore */ }
     var save = function () { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } };
-    function fx() { v.style.filter = (S.brightness === 100 && S.contrast === 100 && S.saturation === 100) ? '' : 'brightness(' + S.brightness + '%) contrast(' + S.contrast + '%) saturate(' + S.saturation + '%)'; }
-    fx();
     function el(tag, css, text) { var e = document.createElement(tag); if (css) e.style.cssText = css; if (text != null) e.textContent = text; return e; }
     function close() { if (panel) { panel.remove(); panel = null; } }
     // run an action of the Toolbox (same permissions, same API calls) without depending on how it is drawn
@@ -1265,15 +1263,6 @@
       head.appendChild(el('strong', '', '⚙️ SETTINGS')); head.appendChild(x); panel.appendChild(head);
       function title(t) { panel.appendChild(el('h3', 'margin:0;padding:14px 16px 6px;font-size:12px;letter-spacing:.08em;color:#666', t)); }
       function row(emoji, label, fn, red) { var b = el('button', ROW + (red ? ';color:#d00000;font-weight:700' : ''), (emoji ? emoji + ' ' : '') + label); b.type = 'button'; b.onclick = fn; panel.appendChild(b); return b; }
-      function group(emoji, label, build) { var a = el('div', 'padding:8px 16px 12px;background:#fafafa;border-bottom:1px solid #f1f1f1;display:flex;flex-direction:column;gap:10px'); a.hidden = true; build(a); row(emoji, label, function () { a.hidden = !a.hidden; }); panel.appendChild(a); }
-      function btn(t, fn) { var b = el('button', 'padding:7px 12px;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#111;font:inherit;cursor:pointer', t); b.type = 'button'; b.onclick = fn; return b; }
-      function slider(a, label, key) {
-        var w = el('label', 'display:flex;flex-direction:column;gap:2px;font-size:13px'), t = el('span'), r = el('input');
-        var paint = function () { t.textContent = label + ' : ' + S[key] + '%'; }; paint();
-        r.type = 'range'; r.min = 50; r.max = 150; r.value = S[key];
-        r.oninput = function () { S[key] = +r.value; paint(); save(); fx(); };
-        w.appendChild(t); w.appendChild(r); a.appendChild(w);
-      }
       function toggleRow(label, key, after) {
         var b = el('button', ROW), s = el('b', 'font-size:13px');
         var paint = function () { s.textContent = S[key] ? 'ON' : 'OFF'; }; paint();
@@ -1283,35 +1272,40 @@
       var soon = function () { toast('Bientôt disponible'); };
       var needClip = function (fn) { return function () { if (!cur()) { toast('Ouvrez un clip'); return; } fn(); }; };
 
-      // 2. account / app settings
-      [['languages', 'Langue', 'lang'], ['gauge', 'Qualité vidéo', 'quality'], ['bell', 'Notifications', 'notif'], ['user-round', 'Compte', 'account'], ['lock', 'Confidentialité', 'privacy'], ['palette', 'Thème', 'theme']]
-        .forEach(function (r) { row('', r[1], function () { viaSub(r[2]); }); });
+      var studio = function (msg, then) { close(); $('up-open').click(); if (msg) toast(msg); if (then) setTimeout(then, 200); };
+      var audioHint = 'Choisissez une vidéo, puis l’onglet Audio du studio';
 
-      // 3. current video
-      title('VIDÉO ACTUELLE');
-      row('🗑️', 'SUPPRIMER', function () { viaToolbox('tb-del', 'Suppression réservée au propriétaire du clip'); }, true);
-      row('💾', 'Enregistrer', function () { viaToolbox('tb-save'); });
-      row('🔗', 'Copier lien', needClip(function () { copyText(location.origin + '/c/' + encodeURIComponent(cur().id)).then(function () { toast('Lien copié'); }); }));
-      row('📤', 'Partager', needClip(function () { close(); $('r-share').onclick(); }));
-      row('🔍', 'Zoom', needClip(function () { close(); $('zoom-bar').hidden = false; zoomSet(1.5); }));
-      group('💡', 'Éclairage', function (a) { slider(a, 'Luminosité', 'brightness'); slider(a, 'Contraste', 'contrast'); slider(a, 'Saturation', 'saturation'); a.appendChild(btn('Réinitialiser', function () { S.brightness = S.contrast = S.saturation = 100; save(); fx(); close(); open(); })); });
+      title('LANGUE & COMPTE');
+      row('', 'Langue', function () { close(); $('b-lang').click(); });
+      row('', 'Mon Compte', function () { viaSub('account'); });
+      row('', 'Notifications', function () { viaSub('notif'); });
+
+      title('VIDÉO');
       row('🎨', 'Filtres', function () { viaToolbox('tb-fx', 'Réservé au propriétaire du clip'); });
+      row('⚙️', 'Réglage Vidéo', function () { viaSub('quality'); });
+      row('✂️', 'Cut', function () { viaToolbox('tb-cut', 'Réservé au propriétaire du clip'); });
+      row('📷', 'Caméra', function () { studio('', function () { var r = $('up-rec'); if (r) r.click(); }); });
+      row('⬆️', 'Importer', function () { studio(''); });
 
-      // 4. audio studio
       title('AUDIO STUDIO');
       toggleRow('Supprimer Audio Original', 'muteOriginal', function () { setSound(!S.muteOriginal); });
-      group('🎵', 'Musique', function (a) {
-        var m = el('input', 'padding:8px;border:1px solid #ccc;border-radius:8px;font:inherit;color:#111'); m.type = 'text'; m.placeholder = 'Titre ou lien'; m.value = S.music;
-        m.onchange = function () { S.music = m.value.trim(); save(); toast('Musique enregistrée'); }; a.appendChild(m);
-      });
-      toggleRow('Commentaire Vocal', 'voice');
-      row('✨', 'Effets', function () { viaToolbox('tb-fx', 'Réservé au propriétaire du clip'); });
+      row('🎵', 'Musique : Liste', function () { studio(audioHint); });
+      row('🎵', 'Musique : Paste', function () { studio(audioHint); });
+      row('🎵', 'Musique : Recherche', function () { studio(audioHint); });
+      row('🎙️', 'Commentaire Vocal', function () { studio(audioHint); });
+      row('✨', 'Effets', function () { studio(audioHint); });
       toggleRow('Sync AI', 'syncAi');
 
-      // 5. platform
+      title('VIDÉO ACTUELLE');
+      row('💾', 'Enregistrer', function () { viaToolbox('tb-save'); });
+      row('📤', 'Partager', needClip(function () { close(); $('r-share').onclick(); }));
+      row('🔗', 'Copier Lien', needClip(function () { copyText(location.origin + '/c/' + encodeURIComponent(cur().id)).then(function () { toast('Lien copié'); }); }));
+      row('📝', 'Modifier', function () { viaToolbox('tb-desc', 'Réservé au propriétaire du clip'); });
+      row('🗑️', 'Supprimer', function () { viaToolbox('tb-del', 'Suppression réservée au propriétaire du clip'); }, true);
+
       title('PLATEFORME');
       row('', 'Coins & XP', soon); row('', 'Clip Challenges', soon); row('', 'Arena Tagging', soon);
-      row('', 'Aide', function () { viaSub('help'); }); row('', 'À propos', function () { viaSub('about'); });
+      row('', 'Aide', function () { viaSub('help'); });
       document.body.appendChild(panel);
     }
     // the existing ⋮ (top left, under Home) opens this panel, with or without an active clip
