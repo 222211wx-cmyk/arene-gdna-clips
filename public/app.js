@@ -834,6 +834,7 @@
     dock(); addEventListener('resize', dock); setInterval(dock, 500);
     b.onclick = toolbox;
   })();
+  $('b-set').onclick = settingsModal;
 
   // after a delete: drop the clip everywhere and go to the next one (or back to the feed when none is left)
   function afterDelete(c) {
