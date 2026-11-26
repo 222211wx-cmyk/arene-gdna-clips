@@ -508,7 +508,12 @@
   function bindSettingsRows(root, back) {
     root.querySelectorAll('[data-set]').forEach(function (b) { b.onclick = function () { setSub(b.dataset.set, back); }; });
   }
-  function settingsModal() { openModal(head('Paramètres') + '<div class="flex flex-col gap-2">' + settingsRows() + '</div>'); bindSettingsRows(modal, settingsModal); }
+  function settingsModal() {
+    openModal(head('Paramètres') + '<div class="flex flex-col gap-2">' + settingsRows() +
+      '<button id="set-out" class="flex w-full items-center gap-3 rounded-xl bg-neutral-800 p-3 text-left text-sm"><i data-lucide="log-out" class="h-5 w-5 shrink-0 text-red-400"></i><span class="flex-1 font-bold">' + (me ? 'Déconnexion' : 'Connexion') + '</span></button></div>');
+    bindSettingsRows(modal, settingsModal);
+    $('set-out').onclick = function () { closeOverlay(); if (me) logout(); else nav('/login'); };
+  }
   var setOpt = function (attr, val, on, t, d) { return '<button ' + attr + '="' + val + '" role="radio" aria-checked="' + on + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (on ? 'bg-amber-400 text-black' : 'bg-neutral-800') + '"><span><b>' + t_(t) + '</b>' + (d ? '<span class="block text-xs ' + (on ? 'text-black/70' : 'text-neutral-400') + '">' + d + '</span>' : '') + '</span>' + (on ? '<span aria-hidden="true">✓</span>' : '') + '</button>'; };
   var t_ = function (x) { return x; };
   var setSw = function (k, t, d, on) { return '<div class="flex items-center justify-between gap-3 rounded-xl bg-neutral-800 p-3"><div class="text-sm"><b>' + t + '</b><div class="text-xs text-neutral-400">' + d + '</div></div><button role="switch" data-sk="' + k + '" aria-checked="' + !!on + '" aria-label="' + t + '" class="relative h-7 w-12 shrink-0 rounded-full ' + (on ? 'bg-amber-400' : 'bg-neutral-600') + '"><span class="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ' + (on ? 'left-[22px]' : 'left-0.5') + '"></span></button></div>'; };
