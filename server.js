@@ -84,6 +84,18 @@ checkBucket(true).then((h) => { console.log(h.ok ? `[r2] bucket ${R2_BUCKET} OK`
 const wrap = (fn) => (req, res) => fn(req, res).catch((e) => { console.error(e); res.status(500).json({ error: e.message }); });
 
 const app = express();
+app.set('trust proxy', true);
+// One domain, one link: www -> apex, http -> https (301), before anything else.
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+  const host = String(req.headers.host || '').toLowerCase().split(':')[0];
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0];
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.railway.app') || host.endsWith('.up.railway.app');
+  if (host.startsWith('www.') || (!isLocal && proto === 'http')) {
+    return res.redirect(301, `https://${host.replace(/^www\./, '')}${req.originalUrl}`);
+  }
+  next();
+});
 app.use(express.json({ limit: '4mb' }));
 
 // Music playlist + AI (work without R2)
