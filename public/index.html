@@ -102,13 +102,17 @@
     <button id="t-ai" aria-label="Ask AI" title="Ask AI" class="flex h-10 w-10 items-center justify-center rounded-full rail-btn bg-black/55 ring-1 ring-white/25"><i data-lucide="sparkles" class="h-5 w-5 text-gold"></i></button>
   </aside>
 
-  <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
-  <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+116px)] pr-16">
+  <!-- Bottom-left stack, right above Accueil: Profil, then Trash (middle of the screen stays empty) -->
+  <div id="l-bottom" class="absolute left-3 z-20 flex flex-col items-start gap-2 pr-16 bottom-[calc(env(safe-area-inset-bottom)+72px)]">
     <div class="flex items-center gap-2">
       <button id="l-eq" aria-label="Mon profil" class="flex min-w-0 items-center gap-2 text-left"><span id="l-eq-t" class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-amber-400 text-sm font-extrabold text-black">EQ</span><span class="min-w-0 leading-tight"><span id="l-eq-n" class="block truncate text-[15px] font-bold txs"></span><span id="l-eq-h" class="block truncate text-xs text-white/75 txs"></span></span></button>
       <button id="follow" class="ml-1 shrink-0 rounded-full border border-white px-3 py-1 text-xs font-bold">Suivre</button>
     </div>
-    <button id="l-del" aria-label="Supprimer" title="Supprimer" class="rail-btn mt-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="trash-2" class="h-5 w-5"></i></button>
+    <button id="l-del" aria-label="Supprimer" title="Supprimer" class="rail-btn flex h-10 w-10 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25"><i data-lucide="trash-2" class="h-5 w-5"></i></button>
+  </div>
+
+  <!-- Bottom: creator + Follow (one place), caption, music, tools, navigation -->
+  <section class="absolute inset-x-0 z-20 px-3 bottom-[calc(env(safe-area-inset-bottom)+176px)] pr-16">
     <p class="mt-2 line-clamp-2 text-sm leading-snug txs"><b id="c-title" class="font-extrabold"></b> <span id="caption"></span></p>
   </section>
 
