@@ -1,6 +1,6 @@
 // Playlist catalog. Audio: SoundHelix example tracks (free to use), proxied by the server for mixing.
 const SRC = (n) => `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${n}.mp3`;
-const T = (id, name, artist, mood, tags, n, hue) => ({ id, name, artist, mood, tags, src: SRC(n), hue });
+const T = (id, name, artist, mood, tags, n, hue) => ({ id, name, artist, mood, tags, src: SRC(n), hue, kind: n <= 10 ? 'music' : 'song' });
 export const TRACKS = [
   T('m01', 'Sunrise Drive', 'SoundHelix', 'joyeux', ['happy', 'fun', 'pop', 'voyage', 'فرح'], 1, 45),
   T('m02', 'Night Pulse', 'SoundHelix', 'energique', ['energy', 'sport', 'electro', 'party', 'حماس'], 2, 280),
@@ -12,8 +12,15 @@ export const TRACKS = [
   T('m08', 'Soft Rain', 'SoundHelix', 'doux', ['soft', 'rain', 'piano', 'love', 'حب'], 8, 210),
   T('m09', 'Dance Floor', 'SoundHelix', 'fete', ['dance', 'party', 'wedding', 'fete', 'عرس', 'رقص'], 9, 120),
   T('m10', 'Open Road', 'SoundHelix', 'voyage', ['travel', 'road', 'summer', 'سفر'], 10, 170),
+  T('m11', 'Blue Hours', 'SoundHelix', 'triste', ['sad', 'triste', 'melancholy', 'pluie', 'solitude', 'حزن'], 11, 230),
+  T('m12', 'Stronger Every Day', 'SoundHelix', 'motivation', ['motivation', 'gym', 'sport', 'goal', 'victoire', 'تحفيز'], 12, 15),
+  T('m13', 'Dark Corridor', 'SoundHelix', 'horreur', ['horreur', 'horror', 'peur', 'suspense', 'dark', 'رعب'], 13, 270),
+  T('m14', 'Summer Party', 'SoundHelix', 'fete', ['party', 'fun', 'danse', 'rire', 'funny', 'ضحك'], 14, 60),
+  T('m15', 'Heartbeat', 'SoundHelix', 'romantique', ['love', 'amour', 'romantic', 'wedding', 'حب'], 15, 340),
+  T('m16', 'Champions', 'SoundHelix', 'epique', ['epic', 'motivation', 'winner', 'sport', 'انتصار'], 16, 40),
+  T('m17', 'Midnight Drive', 'SoundHelix', 'nuit', ['night', 'chill', 'lofi', 'city', 'ليل'], 17, 250),
 ];
-const pub = (t) => ({ id: t.id, name: t.name, artist: t.artist, mood: t.mood, tags: t.tags, audio: `https://www.soundhelix.com/examples/mp3/${t.src.split('/').pop()}`, cover: `/api/music/${t.id}/cover.svg` });
+const pub = (t) => ({ id: t.id, name: t.name, artist: t.artist, mood: t.mood, tags: t.tags, kind: t.kind, audio: `https://www.soundhelix.com/examples/mp3/${t.src.split('/').pop()}`, cover: `/api/music/${t.id}/cover.svg` });
 export const byId = (id) => TRACKS.find((t) => t.id === id);
 export const search = (q = '') => {
   q = q.trim().toLowerCase();

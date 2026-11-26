@@ -11,6 +11,7 @@ import { BRAND_NAME, TAB_LABEL, CANONICAL_URL } from './brand.js';
 import { search as searchMusic, byId as musicById, coverSvg } from './music.js';
 import { ask as askAI, askClip } from './ai.js';
 import { transcode, FILTERS } from './transcode.js';
+import * as aud from './audio.js';
 import { extractArchive, pieceSize, ARCHIVE_EXTS } from './extract.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as db from './db.js';
@@ -95,6 +96,16 @@ app.get('/api/music/:id/audio', wrap(async (req, res) => {
 }));
 app.post('/api/ask', wrap(async (req, res) => res.json(await askClip(String(req.body.prompt || '').slice(0, 500), req.body.clip || {}))));
 app.post('/api/ai', wrap(async (req, res) => res.json(await askAI(String(req.body.prompt || '').slice(0, 500), req.body.context || {}))));
+// ---- Audio studio: sound effects, user sounds (upload / voice take / pasted link) ----
+app.get('/api/sfx', (req, res) => res.json({ effects: aud.SFX.map((x) => ({ id: x.id, name: x.name, tags: x.tags, ref: 'fx:' + x.id, audio: `/api/sfx/${x.id}.mp3` })) }));
+app.get('/api/sfx/:id.mp3', wrap(async (req, res) => { try { res.type('audio/mpeg').set('cache-control', 'public,max-age=86400').sendFile(await aud.sfxFile(req.params.id)); } catch (e) { res.sendStatus(e.status || 500); } }));
+const audioUser = wrapMw2(async (req, res) => { if (!req.user) throw Object.assign(new Error('Connexion requise'), { status: 401 }); });
+app.use('/api/audio', wrapMw(async (req) => { req.user = req.user || (dbConfigured ? await db.userBySession(sidOf(req)) : null); }));
+app.get('/api/audio/up/:id', audioUser, (req, res) => { const f = aud.upFile(req.params.id, req.user.id); if (!f) return res.sendStatus(404); res.type('audio/mpeg').sendFile(f); });
+app.post('/api/audio/upload', audioUser, wrap(async (req, res) => {
+  try { res.json(await aud.saveUpload(req, req.user.id, String(req.query.name || 'Mon son').replace(/[^\p{L}\p{N} ._()-]/gu, '').slice(0, 60) || 'Mon son')); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}));
+app.post('/api/audio/fetch', audioUser, wrap(async (req, res) => { try { res.json(await aud.saveFromUrl(req.body?.url, req.user.id)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } }));
 const api = express.Router();
 api.use(['/upload-url', '/poster-url', '/upload', '/upload-complete', '/extract', '/publish'], (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Connexion requise', code: 'auth' })));
 api.use((req, res, next) => configured ? next()
@@ -458,7 +469,7 @@ app.use('/api', social);
 
 // One DB row per clip (id is the primary key, so a retry can never create a duplicate).
 api.post('/publish', needDb, needUser, wrap(async (req, res) => {
-  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false, trim = null, filter = '', privacy = 'public' } = req.body;
+  const { key, title = '', description = '', comment = '', musicId = null, enhancement = {}, poster = false, trim = null, filter = '', privacy = 'public', look = null, cuts = [], audio: audioReq = null } = req.body;
   if (!PRIVACY.includes(privacy)) return res.status(400).json({ error: 'visibilité invalide' });
   if (!keyOk(key)) return res.status(400).json({ error: 'bad request' });
   if (String(title).trim().length < 2 || /\b(?:VID|IMG|MOV|MVI|PXL|DSC|WA)[-_ ]*\d/i.test(title)) return res.status(400).json({ error: 'Titre requis (pas un nom de fichier)' });
@@ -469,12 +480,17 @@ api.post('/publish', needDb, needUser, wrap(async (req, res) => {
   if (poster) { try { await s3.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: posterKey(key) })); pk = posterKey(key); } catch {} }
   const tr = trim && Number.isFinite(+trim.start) && Number.isFinite(+trim.end) && +trim.start >= 0 && +trim.end - +trim.start >= 1 ? { start: +trim.start, end: +trim.end } : null;
   if (filter && !FILTERS[filter]) return res.status(400).json({ error: 'filtre inconnu' });
+  const lk = look && typeof look === 'object' ? Object.fromEntries(['brightness', 'contrast', 'saturation', 'temperature'].map((k) => [k, Math.max(-100, Math.min(100, Number(look[k]) || 0))])) : null;
+  const cutList = (Array.isArray(cuts) ? cuts : []).slice(0, 20).map((c) => [Number(c?.[0]), Number(c?.[1])]).filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && a >= 0 && b > a);
+  const au = aud.cleanAudio(audioReq);
+  let tracks = [];
+  if (au) { try { tracks = await Promise.all(au.tracks.map(async (t) => ({ ...t, file: await aud.resolveTrack(t.ref, req.user.id) }))); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); } }
   // Compression can take minutes on a big file: run it as a background job; the client polls /publish/:id (same job map as /extract).
   const id = crypto.randomBytes(8).toString('hex');
   const job = { id, userId: req.user.id, step: 'compress', pct: 0 };
   jobs.set(id, job); setTimeout(() => jobs.delete(id), 6 * 3600 * 1000).unref();
   (async () => {
-    const rend = await transcode({ s3, bucket: R2_BUCKET, key, id: idOf(key), trim: tr, filter });
+    const rend = await transcode({ s3, bucket: R2_BUCKET, key, id: idOf(key), trim: tr, filter, look: lk, cuts: cutList, audio: au && { ...au, tracks } });
     const row = await upsertClip({
       id: idOf(key), userId: req.user.id, key, posterKey: pk, v720Key: rend.v720, v360Key: rend.v360, title: String(title).trim().slice(0, 120),
       description: String(description).slice(0, 2200), comment: String(comment).slice(0, 2200),
@@ -564,7 +580,7 @@ app.get('/api/config', async (req, res) => {
 app.use('/api', api);
 app.use('/vendor/ffmpeg', express.static(nm('@ffmpeg/ffmpeg/dist/esm')));
 app.use('/vendor/core', express.static(nm('@ffmpeg/core/dist/esm')));
-const vars = { BRAND_NAME, TAB_LABEL, CANONICAL_URL, BUILD_ID };
+const vars = { BRAND_NAME, TAB_LABEL, CANONICAL_URL, BUILD_ID, SITE_URL: process.env.MAIN_SITE_URL || 'https://gdnaarena.app/' };
 const template = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
 const attr = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const render = (extra = {}) => template.replace(/\{\{(\w+)\}\}/g, (_, k) => attr({ ...vars, OG_TITLE: BRAND_NAME, PAGE_URL: CANONICAL_URL, ...extra }[k] ?? ''));
@@ -577,7 +593,7 @@ app.get('/c/:id', async (req, res) => {
   if (dbConfigured && clipId(id)) { const m = await clipById(id).catch(() => null); title = (m?.description || m?.title || '').split('\n')[0].slice(0, 90); }
   noStore(res).type('html').send(render({ OG_TITLE: title ? `${title} - ${BRAND_NAME}` : BRAND_NAME, PAGE_URL: `${CANONICAL_URL}/c/${id}` }));
 });
-app.get(['/', '/index.html'], sendIndex);
+app.get(['/', '/index.html', '/arena-clips', '/arena-clips/*splat'], sendIndex);   // /arena-clips = direct link to the Clips feed
 app.use(express.static(path.join(__dirname, 'public'), { index: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 app.use(sendIndex);
 
