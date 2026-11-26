@@ -39,7 +39,7 @@
   #hdr.bare #search-form{display:none}
   #hdr{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:480px;z-index:9999}
   #phone{height:var(--vh,100dvh)}
-  #hdr.bare ~ #b-tools{top:calc(env(safe-area-inset-top) + 50px)}
+  #hdr.bare ~ #b-set{top:calc(env(safe-area-inset-top) + 50px)}
   #page{padding-top:32px!important}
   #vid,#vid2{transform-origin:center center}
   .invisible{visibility:hidden}
@@ -76,12 +76,11 @@
         <input id="q" type="search" placeholder="Titre, légende, #tag ou créateur" enterkeyhint="search" autocomplete="off" aria-label="Recherche" class="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/70 outline-none">
         <button id="q-clear" type="button" hidden aria-label="Effacer la recherche" class="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-xs">✕</button>
       </form>
-      <button id="b-set" aria-label="Paramètres" title="Paramètres" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10"><i data-lucide="settings" class="h-5 w-5"></i></button>
       <button id="up-open" aria-label="Importer" class="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-amber-400 px-3 text-sm font-bold text-black"><i data-lucide="upload" class="h-4 w-4"></i>Importer</button>
     </div>
   </header>
-  <!-- Toolbox button: directly under Home -->
-  <button id="b-tools" aria-label="Boîte à outils" title="Boîte à outils" class="absolute left-[54px] top-[calc(env(safe-area-inset-top)+96px)] z-[50] flex h-10 w-10 items-center justify-center rounded-full bg-white/25 ring-2 ring-white/70 shadow-lg"><i data-lucide="ellipsis-vertical" class="h-5 w-5 text-white"></i></button>
+  <!-- Settings button: top-left, directly above T (replaces the old vertical ellipsis) -->
+  <button id="b-set" aria-label="Paramètres" title="Paramètres" class="absolute left-[54px] top-[calc(env(safe-area-inset-top)+96px)] z-[50] flex h-10 w-10 items-center justify-center rounded-full bg-white/25 ring-2 ring-white/70 shadow-lg"><i data-lucide="settings" class="h-5 w-5 text-white"></i></button>
   <button id="r-snd" aria-label="Son" class="rail-btn absolute right-3 top-[calc(env(safe-area-inset-top)+112px)] z-[30] flex h-9 w-9 items-center justify-center rounded-full bg-black/45"><i data-lucide="volume-x" class="h-5 w-5"></i></button>
   <button id="replay" hidden aria-label="Revoir" class="absolute left-1/2 top-[42%] z-[30] flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full bg-black/70 px-6 py-3 text-base font-extrabold ring-1 ring-white/40"><i data-lucide="rotate-ccw" class="h-5 w-5"></i>Revoir</button>
 
