@@ -55,7 +55,7 @@ $('st-tabs').onclick = (e) => {
 $('up-file').onchange = async (e) => {
   const file = e.target.files[0]; e.target.value = '';
   if (!file || busy) return;
-  if (!extOf(file)) { setProgress('❌ Format non supporté: vidéo mp4, mov, webm ou archive zip, 7z, rar, tar, gz', 0); return; }
+  if (!extOf(file)) { const m = '❌ Format non supporté: vidéo mp4, mov, webm ou archive zip, 7z, rar, tar, gz\n(' + (file.name || '?') + ' | type: ' + (file.type || 'inconnu') + ')'; setProgress(m, 0); alert(m); return; }  // step 1 hides the progress label: alert so the rejection is never silent
   if (ARCH.includes(extOf(file))) return importArchive(file);
   resetStudio(file);
   pv.src = URL.createObjectURL(file);
