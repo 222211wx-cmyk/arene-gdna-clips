@@ -1315,8 +1315,8 @@
       row('', 'Aide', function () { viaSub('help'); });
       document.body.appendChild(panel);
     }
-    // the existing ⋮ (top left, under Home) opens this panel, with or without an active clip
-    $('b-tools').onclick = function (e) { if (e) e.stopPropagation(); open(); };
+    // the main ⋯ button (right rail, under Save) opens this panel, with or without an active clip. The left ⋮ (b-tools) keeps its own toolbox.
+    $('r-more').onclick = function (e) { if (e) e.stopPropagation(); open(); };   // MAIN ⋯ button (right rail) opens the full panel
   })();
 
   /* boot */
