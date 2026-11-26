@@ -220,7 +220,7 @@ const SID = 'sid';
 const sidOf = (req) => { const h = req.headers['x-sid']; return (typeof h === 'string' && /^[a-f0-9]{64}$/.test(h) ? h : null) || (/(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '') || [])[1] || null; };
 const secure = (req) => req.secure || req.headers['x-forwarded-proto'] === 'https';
 const setSid = (req, res, token) => { res.locals.sid = token; res.cookie(SID, token, { maxAge: 365 * 864e5, httpOnly: true, sameSite: secure(req) ? 'none' : 'lax', secure: secure(req), path: '/' }); };
-const presentUser = async (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, bio: u.bio, city: u.city, link: u.link, avatar: u.avatar_key && configured ? await mediaUrl(u.avatar_key) : null, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language } });
+const presentUser = async (u) => u && ({ id: u.id, handle: u.handle, name: u.display_name, email: u.email, bio: u.bio, city: u.city, link: u.link, avatar: u.avatar_key && configured ? await mediaUrl(u.avatar_key) : null, settings: { notifications: u.notifications, private_profile: u.private_profile, allow_messages: u.allow_messages, language: u.language, prefs: u.prefs || {} } });
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use('/api', wrapMw(async (req) => {
   req.user = dbConfigured ? await db.userBySession(sidOf(req)) : null;
@@ -296,6 +296,8 @@ social.post('/clips/:id/comments', needViewer, wrap(async (req, res) => {
   const c = await clipOr404(req, res); if (!c) return;
   const body = String(req.body?.body || '').trim().slice(0, 500);
   if (!body) return res.status(400).json({ error: 'commentaire vide' });
+  const own = await db.ownerPrefs(c.id), wc = own?.prefs?.who_comments || 'everyone';
+  if (own && own.id !== req.viewer.id && (wc === 'nobody' || (wc === 'followers' && !(await db.isFollowerOf(req.viewer.id, own.id))))) return res.status(403).json({ error: wc === 'nobody' ? 'Les commentaires sont désactivés pour ce créateur' : 'Seuls les abonnés peuvent commenter' });
   res.json({ ...(await db.addComment(req.viewer.id, c.id, body)), name: req.viewer.display_name });
 }));
 const followHandle = async (req, res, handle) => {
@@ -443,6 +445,16 @@ social.patch('/me', needUser, wrap(async (req, res) => {
   if (typeof b.display_name === 'string') { const n = b.display_name.trim().slice(0, 40); if (n.length < 2) return res.status(400).json({ error: 'Nom trop court', field: 'name' }); s.display_name = n; }
   if (typeof b.username === 'string') { const h = b.username.trim().replace(/^@/, '').toLowerCase(); if (!/^[a-z0-9_.]{3,24}$/.test(h)) return res.status(400).json({ error: 'Nom d’utilisateur : 3 à 24 caractères (lettres, chiffres, _ ou .)', field: 'username' }); if (h !== req.user.handle) s.handle = h; }
   if (typeof b.bio === 'string') s.bio = b.bio.trim().slice(0, 300);
+  if (b.prefs && typeof b.prefs === 'object') {
+    const p = {}, x = b.prefs;
+    if (x.notif && typeof x.notif === 'object') p.notif = Object.fromEntries(['clip', 'like', 'comment', 'follow'].map((k) => [k, x.notif[k] !== false]));
+    if (['everyone', 'followers', 'nobody'].includes(x.who_comments)) p.who_comments = x.who_comments;
+    if (['everyone', 'nobody'].includes(x.who_download)) p.who_download = x.who_download;
+    if (/^#[0-9a-f]{6}$/i.test(x.accent || '')) p.accent = x.accent.toLowerCase();
+    if (typeof x.lang === 'string' && /^[a-z]{2,3}$/.test(x.lang)) p.lang = x.lang;
+    if (x.notif_seen === true) p.notif_seen = new Date().toISOString();
+    s.prefs = p;
+  }
   if (typeof b.city === 'string') s.city = b.city.trim().slice(0, 60);
   if (typeof b.link === 'string') {
     let l = b.link.trim().slice(0, 200);
@@ -456,6 +468,25 @@ social.patch('/me', needUser, wrap(async (req, res) => {
   const r = await db.updateSettings(req.user.id, s);
   if (r.error) return res.status(409).json({ error: 'Ce nom d’utilisateur est déjà pris', field: 'username' });
   res.json({ user: await presentUser(r.user) });
+}));
+social.post('/me/password', needUser, throttle, wrap(async (req, res) => {
+  const cur = String(req.body?.current || ''), next = String(req.body?.next || '');
+  if (next.length < 8 || next.length > 200) return res.status(400).json({ error: 'Nouveau mot de passe : 8 caractères minimum' });
+  if (!(await db.changePassword(req.user.id, cur, next))) return res.status(403).json({ error: 'Mot de passe actuel incorrect' });
+  res.json({ ok: true });
+}));
+social.get('/notifications', needUser, wrap(async (req, res) => {
+  const pr = req.user.prefs || {}, n = pr.notif || {};
+  const types = { clip: n.clip !== false, like: n.like !== false, comment: n.comment !== false, follow: n.follow !== false };
+  if (!req.user.notifications) return res.json({ items: [], fresh: 0, off: true });
+  res.json(await db.notificationFeed(req.user.id, types, pr.notif_seen));
+}));
+social.post('/support', throttle, wrap(async (req, res) => {
+  const kind = req.body?.kind === 'bug' ? 'bug' : 'contact', message = String(req.body?.message || '').trim().slice(0, 2000), contact = String(req.body?.contact || '').trim().slice(0, 200);
+  if (message.length < 5) return res.status(400).json({ error: 'Décrivez votre message en quelques mots' });
+  await db.addSupport(req.user?.id || null, kind, message, contact);
+  console.log(`[support] ${kind} from ${req.user?.handle || 'anonymous'}`);
+  res.json({ ok: true });
 }));
 social.post('/me/check-password', needUser, throttle, wrap(async (req, res) => res.json({ ok: await db.passwordOk(req.user.id, req.body?.password) })));
 social.delete('/me', needUser, wrap(async (req, res) => {
@@ -525,6 +556,8 @@ api.get('/clips/:id/download', wrap(async (req, res) => {
   const key = await findKey(req.params.id);
   if (!key) return res.status(404).json({ error: 'clip introuvable' });
   const row = dbConfigured ? await clipById(req.params.id) : null;
+  const op = row && row.author_id !== req.user?.id ? await db.ownerPrefs(req.params.id) : null;
+  if (op?.prefs?.who_download === 'nobody') return res.status(403).json({ error: 'Le créateur a désactivé les téléchargements' });
   if (row && !row.allow_download && row.author_id !== req.user?.id) return res.status(403).json({ error: 'Le propriétaire a désactivé le téléchargement' });
   const url = await getSignedUrl(s3, new GetObjectCommand({
     Bucket: R2_BUCKET, Key: key,

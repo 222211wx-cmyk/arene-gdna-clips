@@ -103,6 +103,15 @@ ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS bio text NOT NULL DEFAULT '';
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS city text NOT NULL DEFAULT '';
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS link text NOT NULL DEFAULT '';
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS avatar_key text;
+ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS prefs jsonb NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS clips.support (
+  id bigserial PRIMARY KEY,
+  user_id uuid REFERENCES clips.users(id) ON DELETE SET NULL,
+  kind text NOT NULL,
+  message text NOT NULL,
+  contact text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 ALTER TABLE clips.users ADD COLUMN IF NOT EXISTS cover_key text;
 CREATE TABLE IF NOT EXISTS clips.media (
   id bigserial PRIMARY KEY,
@@ -271,7 +280,7 @@ const checkPw = (pw, stored) => {
   const a = Buffer.from(h, 'hex'), b = crypto.scryptSync(pw, salt, 64);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
-const USER_COLS = 'id, handle, display_name, bio, city, link, avatar_key, cover_key, email, notifications, private_profile, allow_messages, language, created_at';
+const USER_COLS = 'id, handle, display_name, bio, city, link, avatar_key, cover_key, email, notifications, private_profile, allow_messages, language, prefs, created_at';
 export async function signup({ email, username, name, password }) {
   try {
     const { rows } = await pool.query(
@@ -317,10 +326,11 @@ export async function updateSettings(userId, s) {
       `UPDATE clips.users SET notifications = COALESCE($2, notifications), private_profile = COALESCE($3, private_profile),
          allow_messages = COALESCE($4, allow_messages), display_name = COALESCE($5, display_name), language = 'fr',
          handle = COALESCE($6, handle), bio = COALESCE($7, bio), city = COALESCE($8, city), link = COALESCE($9, link),
-         avatar_key = COALESCE($10, avatar_key), cover_key = COALESCE($11, cover_key)
+         avatar_key = COALESCE($10, avatar_key), cover_key = COALESCE($11, cover_key),
+         prefs = COALESCE(prefs || $12::jsonb, prefs)
        WHERE id = $1 RETURNING ${USER_COLS}`,
       [userId, s.notifications ?? null, s.private_profile ?? null, s.allow_messages ?? null, s.display_name ?? null,
-        s.handle ?? null, s.bio ?? null, s.city ?? null, s.link ?? null, s.avatar_key ?? null, s.cover_key ?? null]);
+        s.handle ?? null, s.bio ?? null, s.city ?? null, s.link ?? null, s.avatar_key ?? null, s.cover_key ?? null, s.prefs ? JSON.stringify(s.prefs) : null]);
     if (s.private_profile === false) await pool.query("UPDATE clips.follows SET status = 'accepted' WHERE followee_id = $1 AND status = 'pending'", [userId]);
     return { user: rows[0] };
   } catch (e) { if (e.code === '23505') return { error: 'username' }; throw e; }
@@ -486,3 +496,32 @@ export async function backfillTags() {
   const { rows } = await pool.query("SELECT id, title, description, comment FROM clips.clips WHERE tags = ''");
   for (const r of rows) { const t = tagsOf(r.title, r.description, r.comment); if (t) await pool.query('UPDATE clips.clips SET tags = $2 WHERE id = $1', [r.id, t]); }
 }
+
+// ---- settings extras: password, per-owner permissions, notification feed, support messages ----
+export async function changePassword(userId, current, next) {
+  if (!(await passwordOk(userId, current))) return false;
+  await pool.query('UPDATE clips.users SET password_hash = $2 WHERE id = $1', [userId, hashPw(next)]);
+  return true;
+}
+// owner's preferences for a clip: who may comment, who may download
+export async function ownerPrefs(clipId) {
+  const { rows } = await pool.query('SELECT u.id, u.prefs FROM clips.clips c JOIN clips.users u ON u.id = c.user_id WHERE c.id = $1', [clipId]);
+  return rows[0] || null;
+}
+export async function isFollowerOf(userId, authorId) {
+  const { rows } = await pool.query("SELECT 1 FROM clips.follows WHERE follower_id = $1 AND followee_id = $2 AND status = 'accepted'", [userId, authorId]);
+  return rows.length > 0;
+}
+// recent events for one user, by type; `since` marks what is new
+export async function notificationFeed(userId, types, since) {
+  const parts = [], args = [userId];
+  if (types.like) parts.push(`SELECT 'like' AS type, u.display_name AS who, u.handle, c.id AS clip_id, c.title AS detail, l.created_at AS at FROM clips.likes l JOIN clips.clips c ON c.id = l.clip_id JOIN clips.users u ON u.id = l.user_id WHERE c.user_id = $1 AND l.user_id <> $1`);
+  if (types.comment) parts.push(`SELECT 'comment' AS type, u.display_name AS who, u.handle, c.id AS clip_id, m.body AS detail, m.created_at AS at FROM clips.comments m JOIN clips.clips c ON c.id = m.clip_id JOIN clips.users u ON u.id = m.user_id WHERE c.user_id = $1 AND m.user_id <> $1`);
+  if (types.follow) parts.push(`SELECT 'follow' AS type, u.display_name AS who, u.handle, NULL::text AS clip_id, ''::text AS detail, f.created_at AS at FROM clips.follows f JOIN clips.users u ON u.id = f.follower_id WHERE f.followee_id = $1 AND f.status = 'accepted'`);
+  if (types.clip) parts.push(`SELECT 'clip' AS type, u.display_name AS who, u.handle, c.id AS clip_id, c.title AS detail, c.created_at AS at FROM clips.clips c JOIN clips.users u ON u.id = c.user_id JOIN clips.follows f ON f.followee_id = c.user_id AND f.follower_id = $1 AND f.status = 'accepted' WHERE c.privacy = 'public'`);
+  if (!parts.length) return { items: [], fresh: 0 };
+  const { rows } = await pool.query(`SELECT * FROM (${parts.join(' UNION ALL ')}) e ORDER BY at DESC LIMIT 40`, args);
+  const t = since ? new Date(since).getTime() : 0;
+  return { items: rows.map((r) => ({ type: r.type, who: r.who, handle: r.handle, clip: r.clip_id, detail: r.detail, at: r.at })), fresh: rows.filter((r) => new Date(r.at).getTime() > t).length };
+}
+export const addSupport = (userId, kind, message, contact) => pool.query('INSERT INTO clips.support (user_id, kind, message, contact) VALUES ($1,$2,$3,$4)', [userId, kind, message, contact]);
