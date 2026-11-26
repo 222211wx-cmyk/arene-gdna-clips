@@ -638,7 +638,7 @@ app.get('/c/:id', async (req, res) => {
   if (dbConfigured && clipId(id)) { const m = await clipById(id).catch(() => null); title = (m?.description || m?.title || '').split('\n')[0].slice(0, 90); }
   noStore(res).type('html').send(render({ OG_TITLE: title ? `${title} - ${BRAND_NAME}` : BRAND_NAME, PAGE_URL: `${CANONICAL_URL}/c/${id}` }));
 });
-app.get(['/', '/index.html', '/arena-clips', '/arena-clips/*splat'], sendIndex);   // /arena-clips = direct link to the Clips feed
+app.get(['/', '/index.html', '/arena-clips', '/arena-clips/*splat', '/arena-race', '/arena-race/*splat', '/arena-appel', '/arena-appel/*splat'], sendIndex);   // /arena-clips = direct link to the Clips feed
 app.use(express.static(path.join(__dirname, 'public'), { index: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 app.use(sendIndex);
 
