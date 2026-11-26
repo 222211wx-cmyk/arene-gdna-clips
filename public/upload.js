@@ -66,9 +66,17 @@ $('up-file').onchange = async (e) => {
     $('st-t0').value = 0; $('st-t1').value = st.dur.toFixed(1); syncTools(); renderCuts();
   };
   $('st-1').hidden = true; $('st-2').hidden = false; $('up-title').textContent = 'Description';
+  applyIntent();
   st.ctx = await analyze(file).catch(() => ({}));
   if (st.ai && !st.aiAsked) { st.aiAsked = true; ask(''); }
 };
+// the ⚙️ SETTINGS menu can ask the studio to open on a given tab once a video is chosen: {tab, cat, rm, rec}
+function applyIntent() {
+  const it = window.__studioIntent; window.__studioIntent = null; if (!it || Date.now() - (it.ts || 0) > 120000) return;
+  const tab = document.querySelector(`#st-tabs button[data-tab=${it.tab || 'adjust'}]`); if (tab) tab.click();
+  if (it.cat) setTimeout(() => { const c = document.querySelector(`#au-cats button[data-cat=${it.cat}]`); if (c) c.click(); if (it.q) $('au-q').focus(); if (it.url) $('au-url').focus(); }, 60);
+  if (it.rm) setTimeout(() => { if ($('au-rm').getAttribute('aria-pressed') !== 'true') $('au-rm').click(); }, 60);
+}
 // a MediaRecorder file reports an infinite duration until it has been read to the end once
 function fixDuration() {
   return new Promise((ok) => { pv.currentTime = 1e7; const done = () => { pv.removeEventListener('timeupdate', done); pv.currentTime = 0; ok(); }; pv.addEventListener('timeupdate', done); setTimeout(ok, 3000); });

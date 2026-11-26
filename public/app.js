@@ -515,7 +515,7 @@
   var card = function (h) { return '<div class="rounded-xl bg-neutral-800 p-3 text-sm">' + h + '</div>'; };
   var lbl = function (t) { return '<div class="mt-3 mb-1 text-xs font-bold uppercase text-neutral-400">' + t + '</div>'; };
   var rowBtn = function (id, t, d) { return '<button id="' + id + '" class="flex w-full items-center justify-between gap-3 rounded-xl bg-neutral-800 p-3 text-left text-sm"><span><b>' + t + '</b>' + (d ? '<span class="block text-xs text-neutral-400">' + d + '</span>' : '') + '</span><i data-lucide="chevron-right" class="h-4 w-4 shrink-0 text-neutral-500"></i></button>'; };
-  var SUB_TITLES = { faq: 'FAQ', tuto: 'Tutoriel', contact: 'Contacter le support', bug: 'Signaler un problème', terms: 'Conditions d’utilisation', policy: 'Politique de confidentialité' };
+  var SUB_TITLES = { faq: 'FAQ', tuto: 'Tutoriel', contact: 'Contacter le support', bug: 'Signaler un problème', terms: 'Conditions d’utilisation', coins: 'Coins & XP', chal: 'Clip Challenges', tag: 'Arena Tagging', policy: 'Politique de confidentialité' };
   var FAQ = [
     ['Comment publier un clip ?', 'Touchez Importer, choisissez ou enregistrez une vidéo, réglez le montage et l’audio, puis Publier.'],
     ['Dois-je me reconnecter à chaque clip ?', 'Non. Vous vous connectez une seule fois : la session est gardée sur cet appareil et se renouvelle seule.'],
@@ -603,6 +603,41 @@
         body = '<form id="sp-f" class="flex flex-col gap-2" action="javascript:void(0)"><p class="text-sm text-neutral-300">' + (k === 'bug' ? 'Décrivez le problème : ce que vous faisiez et ce qui s’est passé.' : 'Écrivez votre message, nous le lisons.') + '</p><textarea id="sp-m" rows="5" maxlength="2000" aria-label="Message" placeholder="Votre message" class="' + inp + '"></textarea><input id="sp-c" maxlength="200" aria-label="Contact" placeholder="Votre e-mail pour la réponse (facultatif)" value="' + esc(me ? me.email : '') + '" class="' + inp + '"><div id="sp-e" class="text-xs text-red-400" role="alert"></div><button class="' + btn + '">Envoyer</button></form>';
         back = (function (b) { return function () { setSub('help', b); }; })(back);
         break;
+      case 'coins':
+      case 'chal': {
+        if (!me) { body = loginPrompt('Connectez-vous pour suivre votre activité.'); break; }
+        body = '<div id="pf-box">' + card('Chargement…') + '</div>';
+        after = function () {
+          api('GET', '/api/users/' + encodeURIComponent(me.handle)).then(function (u) {
+            var el = $('pf-box'); if (!el) return;
+            var bar = function (v, max) { var pc = Math.min(100, Math.round(v / max * 100)); return '<div class="mt-2 h-2 rounded-full bg-neutral-700"><div class="h-2 rounded-full bg-amber-400" style="width:' + pc + '%"></div></div>'; };
+            if (k === 'coins') {
+              var xp = (u.clips || 0) * 50 + (u.followers || 0) * 10, lvl = Math.floor(xp / 100) + 1;
+              el.innerHTML = '<div class="flex flex-col gap-2">' + card('<div class="text-xs text-neutral-400">Niveau</div><div class="text-2xl font-extrabold">' + lvl + '</div>' + bar(xp % 100, 100) + '<div class="mt-1 text-xs text-neutral-400">' + (xp % 100) + ' / 100 XP vers le niveau ' + (lvl + 1) + '</div>') +
+                '<div class="grid grid-cols-2 gap-2">' + card('<div class="text-xs text-neutral-400">XP</div><b class="text-lg">' + xp + '</b>') + card('<div class="text-xs text-neutral-400">Coins</div><b class="text-lg">' + Math.floor(xp / 10) + '</b>') + '</div>' +
+                card('Comment ça marche : 50 XP par clip publié, 10 XP par abonné. 1 coin = 10 XP. Calculé à partir de votre activité réelle (' + (u.clips || 0) + ' clips, ' + (u.followers || 0) + ' abonnés).') + '</div>';
+            } else {
+              var CH = [['Publier votre premier clip', u.clips || 0, 1], ['Publier 3 clips', u.clips || 0, 3], ['Atteindre 5 abonnés', u.followers || 0, 5], ['Atteindre 25 abonnés', u.followers || 0, 25]];
+              el.innerHTML = '<div class="flex flex-col gap-2">' + CH.map(function (h) { return card('<div class="flex justify-between"><b>' + h[0] + '</b><span class="text-xs text-neutral-400">' + Math.min(h[1], h[2]) + ' / ' + h[2] + (h[1] >= h[2] ? ' ✓' : '') + '</span></div>' + bar(h[1], h[2])); }).join('') + '<button id="ch-go" class="' + btn + '">Relever un défi : publier un clip</button></div>';
+              if ($('ch-go')) $('ch-go').onclick = function () { studioGo({ tab: 'adjust' }); };
+            }
+          }).catch(function () { if ($('pf-box')) $('pf-box').innerHTML = card('Impossible de charger votre activité.'); });
+        };
+        break;
+      }
+      case 'tag': {
+        var ctags = (cur() && cur().tags) || [];
+        body = '<form id="tg-f" class="flex gap-2" action="javascript:void(0)"><input id="tg-q" maxlength="40" placeholder="#tag" aria-label="Tag" class="' + field + '"><button class="' + btn + '">Voir</button></form>' +
+          '<p class="mt-2 text-xs text-neutral-400">Trouvez tous les clips d’un #tag. Ajoutez vos tags à la publication (champ « #arena #clip »).</p>' +
+          (ctags.length ? lbl('Tags du clip en cours') + '<div class="flex flex-wrap gap-2">' + ctags.map(function (t) { return '<button data-tg="' + esc(t) + '" class="rounded-full bg-neutral-800 px-3 py-1.5 text-sm">#' + esc(String(t).replace(/^#/, '')) + '</button>'; }).join('') + '</div>' : '') +
+          lbl('Suggestions') + '<div class="flex flex-wrap gap-2">' + ['arena', 'clip', 'gaming', 'musique', 'humour'].map(function (t) { return '<button data-tg="' + t + '" class="rounded-full bg-neutral-800 px-3 py-1.5 text-sm">#' + t + '</button>'; }).join('') + '</div>';
+        after = function () {
+          var go = function (t) { t = String(t).replace(/^#/, '').trim(); if (!t) return toast('Saisissez un tag'); closeOverlay(); nav('/search?q=' + encodeURIComponent('#' + t)); };
+          $('tg-f').onsubmit = function (e) { e.preventDefault(); go($('tg-q').value); };
+          modal.querySelectorAll('[data-tg]').forEach(function (b) { b.onclick = function () { go(b.dataset.tg); }; });
+        };
+        break;
+      }
       case 'about':
         body = '<div class="flex flex-col gap-2">' + card('<div class="text-xs text-neutral-400">Version</div><span id="ab-v" data-notr>…</span>') + rowBtn('ab-terms', 'Conditions d’utilisation', '') + rowBtn('ab-policy', 'Politique de confidentialité', '') + '</div>';
         after = function () { fetch('/api/config').then(function (r) { return r.json(); }).then(function (c) { if ($('ab-v')) $('ab-v').textContent = 'Arena Clips · build ' + (c.build || '—'); }).catch(function () { if ($('ab-v')) $('ab-v').textContent = 'Arena Clips'; }); };
@@ -696,11 +731,36 @@
     modal.querySelectorAll('[data-sk]').forEach(function (b) { b.onclick = function () { var k = b.dataset.sk, p = {}; p[k] = !me.settings[k]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (k === 'notifications') badge(); again(); }).catch(fail); }; });
     var f = $('ts-name'); if (f) f.onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('ts-dn').value }).then(function (r) { me = r.user; paintEq(); toast('Nom enregistré'); }).catch(fail); };
   }
+  // open the studio (Importer) on a given tab once a video is chosen; the menu entry works on a new video
+  function studioGo(it) { closeOverlay(); it.ts = Date.now(); setTimeout(function () { window.__studioIntent = it; $('up-open').click(); if (it.rec) setTimeout(function () { var r = $('up-rec'); if (r) r.click(); }, 250); }, 80); }
+  var pins = function () { try { return JSON.parse(localStorage.getItem('pins') || '[]'); } catch (e) { return []; } };
+  var isPinned = function (id) { return pins().some(function (p) { return p.id === id; }); };
+  function togglePin(c) { var a = pins(), i = a.findIndex(function (p) { return p.id === c.id; }); if (i >= 0) a.splice(i, 1); else a.unshift({ id: c.id, title: c.title || 'Clip' }); try { localStorage.setItem('pins', JSON.stringify(a.slice(0, 50))); } catch (e) { /* ignore */ } return i < 0; }
   function toolbox() {
     var c = viewer || PATHN() === '/' ? cur() : null, mine = isMine(c), none = !c ? 'Ouvrez un clip' : '';
     var dl = c && (c.allowDownload !== false || mine);
     var own = function (sub) { return c ? (mine ? sub : 'Réservé au propriétaire') : none; };
-    openModal(head('Boîte à outils') + '<div class="flex flex-col gap-2">' + '<h3 class="mb-0 text-xs font-bold uppercase text-neutral-400">Paramètres</h3>' + settingsRows() + tgroup('Éditer le clip') +
+    var pinned = c && isPinned(c.id), np = pins().length;
+    openModal(head('⚙️ SETTINGS') + '<div class="flex flex-col gap-2">' + tgroup('1 · Langue & compte') + settingsRows() +
+      tgroup('2 · Vidéo (sur une nouvelle vidéo)') +
+      tbtn('tb-v-fx', '🎨', 'Filtres', 'Aperçu en direct dans le studio') +
+      tbtn('tb-v-adj', '🎚️', 'Réglage vidéo', 'Luminosité, contraste, saturation') +
+      tbtn('tb-v-cut', '✂️', 'Cut', 'Début, fin, diviser, supprimer une partie') +
+      tbtn('tb-v-rec', '🎥', 'Caméra · Enregistrer', 'Filmer directement') +
+      tbtn('tb-imp', '⬆️', 'Importer', 'Ajouter un clip') +
+      tgroup('3 · Audio studio') +
+      tbtn('tb-a-rm', '🔇', 'Supprimer l’audio original', 'Retirer le son d’origine du clip') +
+      tbtn('tb-a-music', '🎵', 'Musique / Chansons', 'Liste, recherche, coller un lien') +
+      tbtn('tb-a-voice', '🎙️', 'Commentaire vocal', 'Liste, enregistrer, coller') +
+      tbtn('tb-a-fx', '🔊', 'Effets sonores', 'Applaudissements, whoosh, pop…') +
+      tbtn('tb-a-ai', '🤖', 'Sync AI / Robot', 'Optionnel, désactivé par défaut') +
+      tgroup('4 · Vidéo actuelle') +
+      tbtn('tb-save', '🔖', 'Enregistrer', none || (c.viewer && c.viewer.saved ? 'Déjà enregistré : toucher pour retirer' : 'Garder dans vos enregistrés'), !c) +
+      tbtn('tb-share', '🔗', 'Partager', none || 'Lien, SMS, WhatsApp, partage externe', !c) +
+      tbtn('tb-copy', '📋', 'Copier le lien', none || 'Copier le lien du clip', !c) +
+      tbtn('tb-pin', '📌', pinned ? 'Désépingler' : 'Épingler', none || (pinned ? 'Retirer des épinglés de cet appareil' : 'Garder en haut de vos épinglés'), !c) +
+      tbtn('tb-pins', '📍', 'Clips épinglés (' + np + ')', 'Sur cet appareil') +
+      tgroup('Modifier') +
       tbtn('tb-desc', '📝', 'Description et titre', own('Titre, description, Coller'), !c || !mine) +
       tbtn('tb-text', '🔤', 'Texte sur le clip', own('Afficher un texte sur la vidéo'), !c || !mine) +
       tbtn('tb-acc', '✨', 'Accessoires et emoji', own('Autocollants emoji sur le clip'), !c || !mine) +
@@ -714,15 +774,16 @@
       tbtn('tb-pc', '🖥️', 'Mode PC / Petit écran', none || 'Fenêtre fixe 800×450', !c) +
       tbtn('tb-fs', '⛶', 'Plein écran', none || 'Lire le clip en plein écran', !c) +
       tgroup('Ce clip') +
-      tbtn('tb-copy', '📋', 'Copier', none || 'Copier le lien du clip', !c) +
-      tbtn('tb-share', '🔗', 'Ouvrir / Partager', none || 'Lien, SMS, WhatsApp, partage externe', !c) +
-      tbtn('tb-save', '🔖', 'Sauvegarder', none || (c.viewer && c.viewer.saved ? 'Déjà enregistré : toucher pour retirer' : 'Garder dans vos enregistrés'), !c) +
       tbtn('tb-dl', '📥', 'Télécharger', c ? (dl ? 'Enregistrer le clip' : 'Désactivé par le propriétaire') : none, !c || !dl) +
       (mine ? tbtn('tb-dlset', '🔓', c.allowDownload !== false ? 'Téléchargement : autorisé' : 'Téléchargement : interdit', 'Toucher pour changer') : '') +
       tbtn('tb-rep', '🚩', 'Signaler', none || 'Signaler ce clip', !c) +
       tbtn('tb-del', '🗑️', 'Supprimer', own('Supprimer ce clip'), !c || !mine) +
+      tgroup('5 · Plateforme') +
+      tbtn('tb-coins', '🪙', 'Coins & XP', 'Votre niveau et vos points') +
+      tbtn('tb-chal', '🏆', 'Clip Challenges', 'Défis et progression') +
+      tbtn('tb-tag', '🏷️', 'Arena Tagging', 'Trouver les clips par #tag') +
+      tbtn('tb-help', '❓', 'Aide', 'FAQ, tutoriel, support') +
       tgroup('Mon espace') +
-      tbtn('tb-imp', '⬆️', 'Importer', 'Ajouter un clip') +
       tbtn('tb-gal', '🖼️', 'Galerie / Gestion des clips', 'Mes clips publiés') +
       tbtn('tb-hist', '🕘', 'Historique', 'Derniers clips vus sur cet appareil') +
       tbtn('tb-prof', '👤', 'Profil : modifier, bio, photo', me ? '@' + esc(me.handle) : 'Se connecter pour voir son profil') +
@@ -786,6 +847,25 @@
     });
     on('tb-zoom', function () { closeOverlay(); setTimeout(function () { $('zoom-bar').hidden = false; zoomSet(1.5); }, 60); });
     on('tb-pc', function () { openPc(c); });
+    on('tb-v-fx', function () { studioGo({ tab: 'filters' }); });
+    on('tb-v-adj', function () { studioGo({ tab: 'adjust' }); });
+    on('tb-v-cut', function () { studioGo({ tab: 'cut' }); });
+    on('tb-v-rec', function () { studioGo({ tab: 'adjust', rec: true }); });
+    on('tb-a-rm', function () { studioGo({ tab: 'audio', rm: true }); });
+    on('tb-a-music', function () { studioGo({ tab: 'audio', cat: 'music', q: true }); });
+    on('tb-a-voice', function () { studioGo({ tab: 'audio', cat: 'voice', url: true }); });
+    on('tb-a-fx', function () { studioGo({ tab: 'audio', cat: 'fx' }); });
+    on('tb-a-ai', function () { studioGo({ tab: 'ai' }); });
+    on('tb-pin', function () { var on1 = togglePin(c); closeOverlay(); toast(on1 ? 'Clip épinglé' : 'Clip désépinglé'); });
+    on('tb-pins', function () {
+      var a = pins();
+      openModal(head('Clips épinglés') + (a.length ? '<div class="flex flex-col gap-2">' + a.map(function (p) { return '<button data-pn="' + esc(p.id) + '" class="rounded-xl bg-neutral-800 p-3 text-left text-sm">📌 <span data-notr>' + esc(p.title) + '</span></button>'; }).join('') + '</div>' : '<div class="rounded-xl bg-neutral-800 p-3 text-sm text-neutral-300">Aucun clip épinglé. Ouvrez un clip puis touchez Épingler.</div>'));
+      modal.querySelectorAll('[data-pn]').forEach(function (b) { b.onclick = function () { closeOverlay(); nav('/c/' + encodeURIComponent(b.dataset.pn)); }; });
+    });
+    on('tb-coins', function () { setSub('coins', toolbox); });
+    on('tb-chal', function () { setSub('chal', toolbox); });
+    on('tb-tag', function () { setSub('tag', toolbox); });
+    on('tb-help', function () { setSub('help', toolbox); });
     on('tb-fs', function () {
       closeOverlay();
       setTimeout(function () {
