@@ -25,7 +25,7 @@
   })();
 
   // /arena-clips opens the same feed as / (direct link to Arena Clips)
-  var PATHN = function () { return location.pathname.replace(/^\/arena-clips(?=\/|$)/, '') || '/'; };
+  var PATHN = function () { return location.pathname.replace(/^\/arena-clips(?=\/|$)/i, '') || '/'; };
   var SITE = (document.querySelector('meta[name=arena-site]') || {}).content || 'https://gdnaarena.app/';
 
   /* ================= helpers ================= */
@@ -101,9 +101,17 @@
   var guard = function (fn) { return function () { if (!me) return needLogin(); return fn.apply(this, arguments); }; };
 
   /* ================= session ================= */
+  // choices saved on the account follow the user to a new device (language, main colour); this device's own choice wins
+  function syncPrefs() {
+    var p = (me && me.settings && me.settings.prefs) || {};
+    try {
+      if (p.accent && !localStorage.getItem('accent')) { localStorage.setItem('accent', p.accent); applyTheme(); }
+      if (p.lang && !localStorage.getItem('lang') && window.I18N) I18N.set(p.lang);
+    } catch (e) { /* private mode */ }
+  }
   function refreshMe() {
     // only an explicit 401 means signed out: a network blip or a 5xx keeps the session (the user is never asked to log in again for that)
-    return api('GET', '/api/me').then(function (r) { me = r.user; unread = r.unread || 0; badge(); paintEq(); }).catch(function (e) { if (e && e.auth) me = null; });
+    return api('GET', '/api/me').then(function (r) { me = r.user; unread = r.unread || 0; badge(); paintEq(); syncPrefs(); }).catch(function (e) { if (e && e.auth) me = null; });
   }
   function badge() { var b = $('msg-badge'), n = me && me.settings.notifications ? unread : 0; b.hidden = !n; b.textContent = n > 99 ? '99+' : n; }
   setInterval(function () { if (me && !document.hidden) refreshMe(); }, 30000);
@@ -133,14 +141,21 @@
   v.parentNode.insertBefore(buf, v.nextSibling);
   var warm = document.createElement('video'); warm.preload = 'auto'; warm.muted = true; warm.setAttribute('playsinline', '');
   // 360p on a slow or data-saving connection (or after a stall), 720p otherwise; the choice sticks for the session
-  function quality() { try { return localStorage.getItem('quality') === 'saver' ? 'saver' : 'auto'; } catch (e) { return 'auto'; } }
+  function quality() { try { var q = localStorage.getItem('quality'); return q === 'saver' ? '480' : ['1080', '720', '480'].indexOf(q) >= 0 ? q : 'auto'; } catch (e) { return 'auto'; } }
   function lowNet() {
-    var k = navigator.connection || {}, s = ''; try { s = sessionStorage.getItem('rend') || ''; } catch (e) { /* private mode */ }
-    if (quality() === 'saver') return true;
+    var k = navigator.connection || {}, s = '', q = quality(); try { s = sessionStorage.getItem('rend') || ''; } catch (e) { /* private mode */ }
+    if (q === '480') return true;      // 480p setting -> the 360p rendition
+    if (q !== 'auto') return false;    // 1080p / 720p -> the best rendition we have (720p)
     if (s) return s === 'low';
     return !!(k.saveData || /(^|-)2g|3g/.test(k.effectiveType || '') || (k.downlink && k.downlink < 1.5));
   }
   function srcOf(c) { return lowNet() && c.url360 ? c.url360 : c.url; }
+  // a quality change takes effect right away: same position, new rendition
+  function requalify() {
+    var c = cur(); if (!c) return; var s = srcOf(c);
+    if (v.getAttribute('src') !== s) { var at = v.currentTime, was = !v.paused; v.src = s; v.addEventListener('loadedmetadata', function h() { v.removeEventListener('loadedmetadata', h); try { v.currentTime = at; } catch (e) { /* ignore */ } if (was) v.play().catch(function () { /* user taps */ }); }); v.load(); }
+    prime();
+  }
   var nextOf = function (i) { return L.length > 1 ? (i + 1) % L.length : -1; };
   function aim(el, c) {
     if (!c) { if (el.getAttribute('src')) { el.removeAttribute('src'); el.load(); } delete el.dataset.id; return; }
@@ -151,7 +166,7 @@
   var stalls = [];
   function onWaiting() {
     if (this !== v) return;
-    var c = cur(), t = Date.now(); if (!c || !c.url360 || v.src === c.url360 || v.currentTime < 0.3) return;
+    var c = cur(), t = Date.now(); if (quality() !== 'auto' || !c || !c.url360 || v.src === c.url360 || v.currentTime < 0.3) return;
     stalls = stalls.filter(function (x) { return t - x < 10000; }); stalls.push(t);
     if (stalls.length >= 2) { stalls = []; try { sessionStorage.setItem('rend', 'low'); } catch (e) { /* ignore */ } var at = v.currentTime; v.src = c.url360; v.addEventListener('loadedmetadata', function h() { v.removeEventListener('loadedmetadata', h); try { v.currentTime = at; } catch (e) { /* ignore */ } if (!userPaused) tryPlay(); }); v.load(); }
   }
@@ -459,19 +474,22 @@
 
 
   /* ================= Settings hub: the SAME seven entries in the ⋮ toolbox, the Settings button and /settings ================= */
-  var SET_ROWS = [['lang', 'languages', 'Langue'], ['quality', 'gauge', 'Qualité vidéo'], ['notif', 'bell', 'Notifications'], ['account', 'user-round', 'Compte'], ['privacy', 'lock', 'Confidentialité'], ['theme', 'palette', 'Thème'], ['help', 'life-buoy', 'Aide']];
+  var SET_ROWS = [['lang', 'languages', 'Langue'], ['quality', 'gauge', 'Qualité vidéo'], ['notif', 'bell', 'Notifications'], ['account', 'user-round', 'Compte'], ['privacy', 'lock', 'Confidentialité'], ['theme', 'palette', 'Thème'], ['help', 'life-buoy', 'Aide'], ['about', 'info', 'À propos']];
   var isLight = false;
   function applyTheme() {
     var t = 'dark'; try { t = localStorage.getItem('theme') || 'dark'; } catch (e) { /* ignore */ }
     isLight = t === 'light' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches);
     $('phone').classList.toggle('light', isLight); document.body.style.background = isLight ? '#fff' : '#000';
+    var ac = '#fbbf24'; try { ac = localStorage.getItem('accent') || ac; } catch (e) { /* ignore */ }
+    var sty = $('accent-css'); if (!sty) { sty = document.createElement('style'); sty.id = 'accent-css'; document.head.appendChild(sty); }
+    sty.textContent = ac === '#fbbf24' ? '' : ':root{--ac:' + ac + '}.text-amber-400{color:var(--ac)!important}.bg-amber-400,.bg-amber-400\\/90,.bg-gold{background-color:var(--ac)!important}.border-amber-400,.focus\\:border-amber-400:focus{border-color:var(--ac)!important}.dot-pulse{background:var(--ac)!important}';
     if (window.paint) window.paint();
   }
   var headB = function (t, back) { return '<div class="mb-3 flex items-center gap-2"><button data-bk class="flex h-11 items-center gap-1 rounded-full bg-neutral-800 px-3 text-sm font-bold"><i data-lucide="chevron-left" class="h-5 w-5"></i>Retour</button><h2 class="min-w-0 flex-1 truncate text-center text-lg font-extrabold">' + t + '</h2><button data-x aria-label="Fermer" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-lg">✕</button></div>'; };
   function setHint(k) {
     var st = me ? me.settings : {};
     if (k === 'lang') return '<span data-notr>' + esc(I18N.name(I18N.get())) + '</span>';
-    if (k === 'quality') return quality() === 'saver' ? 'Économiseur' : 'Auto';
+    if (k === 'quality') return QL[quality()][0];
     if (k === 'notif') return me ? (st.notifications ? 'Activées' : 'Désactivées') : '';
     if (k === 'account') return me ? '<span data-notr>@' + esc(me.handle) + '</span>' : 'Non connecté';
     if (k === 'privacy') return me ? (st.private_profile ? 'Privé' : 'Public') : '';
@@ -489,27 +507,143 @@
   var t_ = function (x) { return x; };
   var setSw = function (k, t, d, on) { return '<div class="flex items-center justify-between gap-3 rounded-xl bg-neutral-800 p-3"><div class="text-sm"><b>' + t + '</b><div class="text-xs text-neutral-400">' + d + '</div></div><button role="switch" data-sk="' + k + '" aria-checked="' + !!on + '" aria-label="' + t + '" class="relative h-7 w-12 shrink-0 rounded-full ' + (on ? 'bg-amber-400' : 'bg-neutral-600') + '"><span class="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ' + (on ? 'left-[22px]' : 'left-0.5') + '"></span></button></div>'; };
   var loginPrompt = function (m) { return '<div class="rounded-xl bg-neutral-800 p-4 text-sm text-neutral-300"><p class="mb-3">' + m + '</p><div class="flex gap-2"><button id="sl-in" class="' + btn + ' flex-1">Se connecter</button><button id="sl-up" class="' + btn2 + ' flex-1">Créer un compte</button></div></div>'; };
+  // ---- helpers shared by the settings pages ----
+  var prefs = function () { return (me && me.settings && me.settings.prefs) || {}; };
+  var ACCENTS = [['#fbbf24', 'Or'], ['#ef4444', 'Rouge'], ['#ec4899', 'Rose'], ['#8b5cf6', 'Violet'], ['#3b82f6', 'Bleu'], ['#22c55e', 'Vert']];
+  var NOTIF_TYPES = [['clip', 'Nouveau clip', 'Un créateur que vous suivez publie'], ['like', 'Like', 'Quelqu’un aime votre clip'], ['comment', 'Commentaire', 'Quelqu’un commente votre clip'], ['follow', 'Abonnement', 'Quelqu’un s’abonne à vous']];
+  var setSw2 = function (attr, k, t, d, on) { return setSw(k, t, d, on).replace('data-sk="' + k + '"', attr + '="' + k + '"'); };
+  var card = function (h) { return '<div class="rounded-xl bg-neutral-800 p-3 text-sm">' + h + '</div>'; };
+  var lbl = function (t) { return '<div class="mt-3 mb-1 text-xs font-bold uppercase text-neutral-400">' + t + '</div>'; };
+  var rowBtn = function (id, t, d) { return '<button id="' + id + '" class="flex w-full items-center justify-between gap-3 rounded-xl bg-neutral-800 p-3 text-left text-sm"><span><b>' + t + '</b>' + (d ? '<span class="block text-xs text-neutral-400">' + d + '</span>' : '') + '</span><i data-lucide="chevron-right" class="h-4 w-4 shrink-0 text-neutral-500"></i></button>'; };
+  var SUB_TITLES = { faq: 'FAQ', tuto: 'Tutoriel', contact: 'Contacter le support', bug: 'Signaler un problème', terms: 'Conditions d’utilisation', policy: 'Politique de confidentialité' };
+  var FAQ = [
+    ['Comment publier un clip ?', 'Touchez Importer, choisissez ou enregistrez une vidéo, réglez le montage et l’audio, puis Publier.'],
+    ['Dois-je me reconnecter à chaque clip ?', 'Non. Vous vous connectez une seule fois : la session est gardée sur cet appareil et se renouvelle seule.'],
+    ['Comment retirer le son d’origine ?', 'Dans le studio, onglet Audio, touchez « Supprimer l’audio original », puis ajoutez une musique, une voix ou un effet.'],
+    ['L’IA est-elle obligatoire ?', 'Non. Le mode AI / Robot est désactivé par défaut : vous restez sur votre vidéo réelle tant que vous ne l’activez pas.'],
+    ['Comment changer la qualité de lecture ?', 'Paramètres, Qualité vidéo. Auto s’adapte à votre connexion ; les autres choix fixent la qualité.'],
+    ['Comment supprimer mon compte ?', 'Paramètres, Confidentialité, Supprimer mon compte. Votre mot de passe est demandé pour confirmer.']
+  ];
+  var TUTO = [
+    ['1. Créez votre compte', 'Inscrivez-vous une seule fois : vous restez connecté.'],
+    ['2. Importez ou enregistrez', 'Touchez Importer, puis choisissez une vidéo ou enregistrez avec la caméra.'],
+    ['3. Montez votre clip', 'Réglages, Filtres, Couper et Audio : l’aperçu se met à jour en direct.'],
+    ['4. Publiez', 'Donnez un titre, une description et des hashtags, puis touchez Publier.'],
+    ['5. Faites-le vivre', 'Likez, commentez, partagez et sauvegardez les clips depuis le fil.']
+  ];
+  var TERMS = ['Arena Clips permet de publier et regarder de courtes vidéos. En l’utilisant, vous acceptez ces règles.', 'Vous publiez uniquement des contenus dont vous détenez les droits (images, musique, voix). Les contenus illégaux, haineux ou qui portent atteinte à autrui sont interdits et peuvent être supprimés.', 'Vous êtes responsable de votre compte et de votre mot de passe. Vous pouvez supprimer votre compte à tout moment depuis Confidentialité.', 'Le service est fourni tel quel ; des interruptions sont possibles. Ces conditions peuvent évoluer, la version en vigueur est celle affichée ici.'];
+  var POLICY = ['Données conservées : votre e-mail, votre nom affiché, votre mot de passe (stocké chiffré), votre profil et vos clips, likes, commentaires et messages.', 'Vos données ne sont ni vendues ni partagées avec des tiers, et l’application n’utilise aucun traceur publicitaire.', 'Vous gardez le contrôle : profil public ou privé, qui peut commenter, qui peut télécharger, notifications. Vos réglages de lecture, de thème et de langue sont gardés sur votre appareil.', 'La suppression du compte efface votre profil et vos contenus de la plateforme.'];
+  var paras = function (a) { return '<div class="flex flex-col gap-3 text-sm text-neutral-300">' + a.map(function (x) { return '<p>' + x + '</p>'; }).join('') + '</div>'; };
+  var QL = { auto: ['Auto', 'S’adapte à votre connexion (720p, ou 360p si elle ralentit)'], '1080': ['1080p', 'Meilleure qualité disponible : 720p'], '720': ['720p', 'Qualité haute'], '480': ['480p', 'Économie de données : 360p'] };
+  function savePrefs(p, again) { return api('PATCH', '/api/me', { prefs: p }).then(function (r) { me = r.user; if (again) again(); }).catch(fail); }
+  var ago = function (t) { var s = Math.max(1, Math.round((Date.now() - new Date(t)) / 1000)); return s < 90 ? 'à l’instant' : s < 5400 ? Math.round(s / 60) + ' min' : s < 129600 ? Math.round(s / 3600) + ' h' : Math.round(s / 86400) + ' j'; };
+
   function setSub(k, back) {
-    var title = SET_ROWS.filter(function (r) { return r[0] === k; })[0][2], again = function () { setSub(k, back); }, body = '', st = me ? me.settings : {};
-    if (k === 'lang') body = '<div role="radiogroup" class="flex flex-col gap-2">' + I18N.LANGS.map(function (l) { return setOpt('data-lg', l[0], I18N.get() === l[0], '<span data-notr>' + l[1] + '</span>', ''); }).join('') + '</div><p class="mt-3 text-xs text-neutral-400">Le changement est immédiat, sans recharger l’appli.</p>';
-    else if (k === 'quality') body = '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-sq', 'auto', quality() === 'auto', 'Auto', '720p, 360p si le réseau ralentit') + setOpt('data-sq', 'saver', quality() === 'saver', 'Économiseur de données', 'Toujours 360p') + '</div>';
-    else if (k === 'notif') body = me ? setSw('notifications', 'Notifications', 'Pastille de nouveaux messages', st.notifications) + '<div class="h-2"></div>' + setSw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire', st.allow_messages) : loginPrompt('Connectez-vous pour régler les notifications.');
-    else if (k === 'account') body = me ? '<div class="flex flex-col gap-2"><div class="rounded-xl bg-neutral-800 p-3 text-sm"><div class="text-xs text-neutral-400">E-mail</div><span data-notr>' + esc(me.email) + '</span></div><form id="ts-name" class="flex gap-2" action="javascript:void(0)"><input id="ts-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Enregistrer</button></form><button id="st-out" class="' + btn2 + ' w-full">Déconnexion</button><button id="tb-del2" class="w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button></div>' : loginPrompt('Vous n’êtes pas connecté. Vous ne vous connectez qu’une seule fois : l’appli vous garde connecté ensuite.');
-    else if (k === 'privacy') body = me ? '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-pp', 'false', !st.private_profile, 'Profil public', 'Tout le monde voit vos clips') + setOpt('data-pp', 'true', !!st.private_profile, 'Profil privé', 'Seuls vos abonnés acceptés voient vos clips') + '</div><div class="mt-2">' + setSw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire', st.allow_messages) + '</div>' : loginPrompt('Connectez-vous pour choisir la confidentialité de votre profil.');
-    else if (k === 'theme') { var th = 'dark'; try { th = localStorage.getItem('theme') || 'dark'; } catch (e) { /* ignore */ } body = '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-th', 'dark', th === 'dark', 'Sombre', '') + setOpt('data-th', 'light', th === 'light', 'Clair', '') + setOpt('data-th', 'auto', th === 'auto', 'Automatique', 'Suit votre téléphone') + '</div>'; }
-    else body = '<div class="flex flex-col gap-2 text-sm">' + [['Comment publier un clip ?', 'Touchez Importer, choisissez ou enregistrez une vidéo, réglez le montage et l’audio, puis Publier.'], ['Dois-je me reconnecter à chaque clip ?', 'Non. Vous vous connectez une seule fois : la session est gardée sur cet appareil.'], ['Comment retirer le son d’origine ?', 'Dans le studio, onglet Audio : « Supprimer l’audio original », puis ajoutez musique, voix ou effets.'], ['L’IA est-elle obligatoire ?', 'Non. Le réel est par défaut ; l’option « Synchroniser avec AI / Robot » est désactivée tant que vous ne l’activez pas.'], ['Mes fichiers sont lourds (100 Mo, 200 Mo…)', 'L’envoi se fait par morceaux et reprend tout seul si la connexion coupe.']].map(function (q) { return '<details class="rounded-xl bg-neutral-800 p-3"><summary class="cursor-pointer font-bold">' + q[0] + '</summary><p class="mt-2 text-neutral-300">' + q[1] + '</p></details>'; }).join('') + '<div class="mt-1 text-center text-xs text-neutral-500" data-notr>' + esc(BASE) + '</div></div>';
+    var row = SET_ROWS.filter(function (r) { return r[0] === k; })[0], title = row ? row[2] : SUB_TITLES[k] || k;
+    var again = function () { setSub(k, back); }, body = '', st = me ? me.settings : {}, pf = prefs(), after = null;
+    switch (k) {
+      case 'lang':
+        body = '<div role="radiogroup" class="flex flex-col gap-2">' + I18N.LANGS.map(function (l) { return setOpt('data-lg', l[0], I18N.get() === l[0], '<span data-notr>' + l[1] + '</span>', ''); }).join('') + '</div><p class="mt-3 text-xs text-neutral-400">Le changement est immédiat, sans recharger l’appli, et votre choix est gardé.</p>';
+        break;
+      case 'quality': {
+        var q = quality();
+        body = '<div role="radiogroup" class="flex flex-col gap-2">' + ['auto', '1080', '720', '480'].map(function (o) { return setOpt('data-sq', o, q === o, QL[o][0], QL[o][1]); }).join('') + '</div><p class="mt-3 text-xs text-neutral-400">S’applique à la lecture des clips, tout de suite.</p>';
+        break;
+      }
+      case 'notif': {
+        if (!me) { body = loginPrompt('Connectez-vous pour régler les notifications.'); break; }
+        var nt = pf.notif || {};
+        body = setSw('notifications', 'Notifications', 'Activer ou couper toutes les notifications', st.notifications) + lbl('Types') + '<div class="flex flex-col gap-2">' + NOTIF_TYPES.map(function (t) { return setSw2('data-sn', t[0], t[1], t[2], nt[t[0]] !== false); }).join('') + '</div>' + lbl('Récentes') + '<div id="nf-list" class="flex flex-col gap-2">' + card('Chargement…') + '</div>';
+        after = function () {
+          api('GET', '/api/notifications').then(function (r) {
+            var el = $('nf-list'); if (!el) return;
+            var tx = { like: 'a aimé votre clip', comment: 'a commenté : ', follow: 's’est abonné à vous', clip: 'a publié un clip : ' };
+            el.innerHTML = r.off ? card('Les notifications sont désactivées.') : r.items.length ? r.items.map(function (i) { return card('<b data-notr>' + esc(i.who) + '</b> ' + tx[i.type] + (i.type === 'comment' || i.type === 'clip' ? '<span data-notr>' + esc(i.detail || '') + '</span>' : '') + '<div class="mt-0.5 text-xs text-neutral-400">' + ago(i.at) + '</div>'); }).join('') : card('Rien de nouveau pour le moment.');
+            if (r.fresh) api('PATCH', '/api/me', { prefs: { notif_seen: true } }).then(function (u) { me = u.user; }).catch(function () { /* optional */ });
+          }).catch(function () { if ($('nf-list')) $('nf-list').innerHTML = card('Impossible de charger les notifications.'); });
+        };
+        break;
+      }
+      case 'account':
+        if (!me) { body = loginPrompt('Connectez-vous pour gérer votre compte.'); break; }
+        body = '<div class="flex flex-col gap-2">' + card('<div class="text-xs text-neutral-400">E-mail</div><span data-notr>' + esc(me.email) + '</span>') + rowBtn('ac-prof', 'Profil', 'Nom, @utilisateur, bio, ville, lien') + rowBtn('ac-photo', 'Photo', 'Changer ma photo de profil') +
+          '<form id="ts-name" class="flex gap-2" action="javascript:void(0)"><input id="ts-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Nom</button></form>' +
+          '<form id="ts-bio" class="flex flex-col gap-2" action="javascript:void(0)"><textarea id="ts-b" maxlength="300" rows="3" aria-label="Bio" placeholder="Votre bio" class="' + inp + '">' + esc(me.bio || '') + '</textarea><button class="' + btn2 + '">Enregistrer la bio</button></form>' +
+          lbl('Mot de passe') + '<form id="ts-pw" class="flex flex-col gap-2" action="javascript:void(0)"><input id="pw-c" type="password" autocomplete="current-password" placeholder="Mot de passe actuel" aria-label="Mot de passe actuel" class="' + inp + '"><input id="pw-n" type="password" autocomplete="new-password" placeholder="Nouveau mot de passe (8 caractères minimum)" aria-label="Nouveau mot de passe" class="' + inp + '"><input id="pw-n2" type="password" autocomplete="new-password" placeholder="Confirmer le nouveau mot de passe" aria-label="Confirmer" class="' + inp + '"><div id="pw-e" class="text-xs text-red-400" role="alert"></div><button class="' + btn2 + '">Changer le mot de passe</button></form>' +
+          '<button id="st-out" class="mt-2 w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Déconnexion</button></div>';
+        break;
+      case 'privacy':
+        if (!me) { body = loginPrompt('Connectez-vous pour choisir la confidentialité de votre compte.') + card('Vos données restent les vôtres : aucun traceur publicitaire, aucune vente ni partage avec des tiers.'); break; }
+        body = '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-pp', 'false', !st.private_profile, 'Compte public', 'Tout le monde voit vos clips') + setOpt('data-pp', 'true', !!st.private_profile, 'Compte privé', 'Seuls vos abonnés acceptés voient vos clips') + '</div>' +
+          lbl('Qui peut commenter') + '<div role="radiogroup" class="flex flex-col gap-2">' + [['everyone', 'Tout le monde'], ['followers', 'Mes abonnés'], ['nobody', 'Personne']].map(function (o) { return setOpt('data-pr', 'who_comments:' + o[0], (pf.who_comments || 'everyone') === o[0], o[1], ''); }).join('') + '</div>' +
+          lbl('Qui peut télécharger') + '<div role="radiogroup" class="flex flex-col gap-2">' + [['everyone', 'Tout le monde'], ['nobody', 'Personne']].map(function (o) { return setOpt('data-pr', 'who_download:' + o[0], (pf.who_download || 'everyone') === o[0], o[1], o[0] === 'nobody' ? 'Vos clips ne peuvent pas être téléchargés' : ''); }).join('') + '</div>' +
+          '<div class="mt-3">' + setSw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire', st.allow_messages) + '</div>' +
+          '<div class="mt-3 rounded-xl bg-neutral-800 p-3 text-xs text-neutral-300">Vos données restent les vôtres : aucun traceur publicitaire, aucune vente ni partage avec des tiers. Vous choisissez qui voit vos clips, qui peut commenter et télécharger, et vous pouvez supprimer votre compte à tout moment.</div>' +
+          '<button id="tb-del2" class="mt-2 w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button>';
+        break;
+      case 'theme': {
+        var th = 'dark', ac = '#fbbf24'; try { th = localStorage.getItem('theme') || 'dark'; ac = localStorage.getItem('accent') || ac; } catch (e) { /* ignore */ }
+        body = '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-th', 'dark', th === 'dark', 'Sombre', '') + setOpt('data-th', 'light', th === 'light', 'Clair', '') + setOpt('data-th', 'auto', th === 'auto', 'Automatique', 'Suit votre téléphone') + '</div>' +
+          lbl('Couleur principale') + '<div role="radiogroup" class="flex flex-wrap gap-3">' + ACCENTS.map(function (a) { return '<button data-ac="' + a[0] + '" role="radio" aria-checked="' + (ac === a[0]) + '" aria-label="' + a[1] + '" class="flex h-11 w-11 items-center justify-center rounded-full text-lg font-bold text-black ' + (ac === a[0] ? 'ring-2 ring-white' : '') + '" style="background:' + a[0] + '">' + (ac === a[0] ? '✓' : '') + '</button>'; }).join('') + '</div>';
+        break;
+      }
+      case 'help':
+        body = '<div class="flex flex-col gap-2">' + rowBtn('hp-faq', 'FAQ', 'Questions fréquentes') + rowBtn('hp-tuto', 'Tutoriel', 'Publier un clip en 5 étapes') + rowBtn('hp-contact', 'Contacter le support', 'Écrivez-nous') + rowBtn('hp-bug', 'Signaler un problème', 'Quelque chose ne marche pas') + '</div>';
+        break;
+      case 'faq':
+        body = '<div class="flex flex-col gap-2">' + FAQ.map(function (f) { return '<details class="rounded-xl bg-neutral-800 p-3 text-sm"><summary class="cursor-pointer font-bold">' + f[0] + '</summary><p class="mt-2 text-neutral-300">' + f[1] + '</p></details>'; }).join('') + '</div>';
+        back = (function (b) { return function () { setSub('help', b); }; })(back);
+        break;
+      case 'tuto':
+        body = '<ol class="flex flex-col gap-2">' + TUTO.map(function (t) { return '<li>' + card('<b>' + t[0] + '</b><div class="text-neutral-300">' + t[1] + '</div>') + '</li>'; }).join('') + '</ol>';
+        back = (function (b) { return function () { setSub('help', b); }; })(back);
+        break;
+      case 'contact':
+      case 'bug':
+        body = '<form id="sp-f" class="flex flex-col gap-2" action="javascript:void(0)"><p class="text-sm text-neutral-300">' + (k === 'bug' ? 'Décrivez le problème : ce que vous faisiez et ce qui s’est passé.' : 'Écrivez votre message, nous le lisons.') + '</p><textarea id="sp-m" rows="5" maxlength="2000" aria-label="Message" placeholder="Votre message" class="' + inp + '"></textarea><input id="sp-c" maxlength="200" aria-label="Contact" placeholder="Votre e-mail pour la réponse (facultatif)" value="' + esc(me ? me.email : '') + '" class="' + inp + '"><div id="sp-e" class="text-xs text-red-400" role="alert"></div><button class="' + btn + '">Envoyer</button></form>';
+        back = (function (b) { return function () { setSub('help', b); }; })(back);
+        break;
+      case 'about':
+        body = '<div class="flex flex-col gap-2">' + card('<div class="text-xs text-neutral-400">Version</div><span id="ab-v" data-notr>…</span>') + rowBtn('ab-terms', 'Conditions d’utilisation', '') + rowBtn('ab-policy', 'Politique de confidentialité', '') + '</div>';
+        after = function () { fetch('/api/config').then(function (r) { return r.json(); }).then(function (c) { if ($('ab-v')) $('ab-v').textContent = 'Arena Clips · build ' + (c.build || '—'); }).catch(function () { if ($('ab-v')) $('ab-v').textContent = 'Arena Clips'; }); };
+        break;
+      case 'terms':
+        body = paras(TERMS); back = (function (b) { return function () { setSub('about', b); }; })(back); break;
+      case 'policy':
+        body = paras(POLICY); back = (function (b) { return function () { setSub('about', b); }; })(back); break;
+    }
     openModal(headB(title) + body);
+    var go = function (id, sub) { if ($(id)) $(id).onclick = function () { setSub(sub, back); }; };
+    go('hp-faq', 'faq'); go('hp-tuto', 'tuto'); go('hp-contact', 'contact'); go('hp-bug', 'bug'); go('ab-terms', 'terms'); go('ab-policy', 'policy');
     var bk = modal.querySelector('[data-bk]'); bk.onclick = function () { if (back === closeOverlay) closeOverlay(); else back(); };
-    modal.querySelectorAll('[data-lg]').forEach(function (b) { b.onclick = function () { I18N.set(b.dataset.lg); if (me) api('PATCH', '/api/me', { language: b.dataset.lg }).catch(function () { /* optional */ }); again(); }; });
-    modal.querySelectorAll('[data-sq]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('quality', b.dataset.sq); sessionStorage.removeItem('rend'); } catch (e) { /* ignore */ } shownId = null; again(); toast('Enregistré'); }; });
+    modal.querySelectorAll('[data-lg]').forEach(function (b) { b.onclick = function () { I18N.set(b.dataset.lg); if (me) savePrefs({ lang: b.dataset.lg }); again(); }; });
+    modal.querySelectorAll('[data-sq]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('quality', b.dataset.sq); sessionStorage.removeItem('rend'); } catch (e) { /* ignore */ } requalify(); again(); toast('Qualité : ' + QL[b.dataset.sq][0]); }; });
     modal.querySelectorAll('[data-th]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('theme', b.dataset.th); } catch (e) { /* ignore */ } applyTheme(); again(); }; });
+    modal.querySelectorAll('[data-ac]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('accent', b.dataset.ac); } catch (e) { /* ignore */ } applyTheme(); if (me) savePrefs({ accent: b.dataset.ac }); again(); }; });
     modal.querySelectorAll('[data-sk]').forEach(function (b) { b.onclick = function () { var kk = b.dataset.sk, p = {}; p[kk] = !me.settings[kk]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (kk === 'notifications') badge(); again(); }).catch(fail); }; });
+    modal.querySelectorAll('[data-sn]').forEach(function (b) { b.onclick = function () { var n = Object.assign({ clip: true, like: true, comment: true, follow: true }, prefs().notif || {}); n[b.dataset.sn] = !n[b.dataset.sn]; savePrefs({ notif: n }, again); }; });
+    modal.querySelectorAll('[data-pr]').forEach(function (b) { b.onclick = function () { var kv = b.dataset.pr.split(':'), p = {}; p[kv[0]] = kv[1]; savePrefs(p, again); }; });
     modal.querySelectorAll('[data-pp]').forEach(function (b) { b.onclick = function () { api('PATCH', '/api/me', { private_profile: b.dataset.pp === 'true' }).then(function (r) { me = r.user; again(); }).catch(fail); }; });
     var f = $('ts-name'); if (f) f.onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('ts-dn').value }).then(function (r) { me = r.user; paintEq(); toast('Nom enregistré'); }).catch(fail); };
+    f = $('ts-bio'); if (f) f.onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { bio: $('ts-b').value }).then(function (r) { me = r.user; toast('Bio enregistrée'); }).catch(fail); };
+    f = $('ts-pw'); if (f) f.onsubmit = function (e) {
+      e.preventDefault(); var er = $('pw-e'); er.textContent = '';
+      if ($('pw-n').value.length < 8) { er.textContent = 'Nouveau mot de passe : 8 caractères minimum'; return; }
+      if ($('pw-n').value !== $('pw-n2').value) { er.textContent = 'Les deux mots de passe ne correspondent pas'; return; }
+      api('POST', '/api/me/password', { current: $('pw-c').value, next: $('pw-n').value }).then(function () { toast('Mot de passe changé'); f.reset(); }).catch(function (x) { er.textContent = (x && x.message) || 'Erreur'; });
+    };
+    f = $('sp-f'); if (f) f.onsubmit = function (e) {
+      e.preventDefault(); var er = $('sp-e'); er.textContent = '';
+      api('POST', '/api/support', { kind: k, message: $('sp-m').value, contact: $('sp-c').value }).then(function () { toast('Message envoyé, merci'); back(); }).catch(function (x) { er.textContent = (x && x.message) || 'Envoi impossible'; });
+    };
+    var editMe = function (focus) { closeOverlay(); setTimeout(function () { api('GET', '/api/users/' + encodeURIComponent(me.handle)).then(function (u) { editProfile(u, focus); }).catch(fail); }, 80); };
+    if ($('ac-prof')) $('ac-prof').onclick = function () { editMe(); };
+    if ($('ac-photo')) $('ac-photo').onclick = function () { editMe('avatar'); };
     if ($('st-out')) $('st-out').onclick = function () { logout(); };
     if ($('tb-del2')) $('tb-del2').onclick = deleteAccountModal;
     if ($('sl-in')) $('sl-in').onclick = function () { nav('/login?next=' + encodeURIComponent(location.pathname)); };
     if ($('sl-up')) $('sl-up').onclick = function () { nav('/signup?next=' + encodeURIComponent(location.pathname)); };
+    if (after) after();
   }
   // the globe next to Retour: language list only
   function languagePicker() { setSub('lang', closeOverlay); }
@@ -578,6 +712,7 @@
       tbtn('tb-vol', soundOn ? '🔊' : '🔇', 'Son / Volume', soundOn ? 'Son activé : toucher pour couper' : 'Son coupé : toucher pour activer', !c) +
       tbtn('tb-zoom', '🔍', 'Zoom + / − / Reset', none || '100 % → 150 % → 200 %', !c) +
       tbtn('tb-pc', '🖥️', 'Mode PC / Petit écran', none || 'Fenêtre fixe 800×450', !c) +
+      tbtn('tb-fs', '⛶', 'Plein écran', none || 'Lire le clip en plein écran', !c) +
       tgroup('Ce clip') +
       tbtn('tb-copy', '📋', 'Copier', none || 'Copier le lien du clip', !c) +
       tbtn('tb-share', '🔗', 'Ouvrir / Partager', none || 'Lien, SMS, WhatsApp, partage externe', !c) +
@@ -651,6 +786,17 @@
     });
     on('tb-zoom', function () { closeOverlay(); setTimeout(function () { $('zoom-bar').hidden = false; zoomSet(1.5); }, 60); });
     on('tb-pc', function () { openPc(c); });
+    on('tb-fs', function () {
+      closeOverlay();
+      setTimeout(function () {
+        var el = $('phone');
+        if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+        var rq = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (rq) rq.call(el).catch(function () { toast('Plein écran non disponible'); });
+        else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+        else toast('Plein écran non disponible sur cet appareil');
+      }, 80);
+    });
     on('tb-vol', function () { setSound(!soundOn); closeOverlay(); toast(soundOn ? 'Son activé' : 'Son coupé'); });
     on('tb-dl', function () { var a = document.createElement('a'); a.href = '/api/clips/' + encodeURIComponent(c.id) + '/download'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); toast('Téléchargement…'); });
     on('tb-dlset', guard(function () {
@@ -1067,7 +1213,8 @@
 
   /* chrome: Home, logo, back, close, bottom nav */
   $('b-home').onclick = function () { nav('/'); };
-  $('logo').onclick = function () { location.href = SITE; };   // the GDNA ARENA logo leads to the full official site
+  // fixed tab title: always shown and active; already on /Arena-Clips it stays on the tab, otherwise it opens gdnaarena.app/Arena-Clips
+  $('tab-clips').onclick = function () { if (/^\/arena-clips(\/|$)/i.test(location.pathname)) { /* already on the tab: stay */ } else location.href = SITE.replace(/\/?$/, '/') + 'Arena-Clips'; };
   $('b-lang').onclick = languagePicker;
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
