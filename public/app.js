@@ -830,7 +830,7 @@
   }
   // ⋮ sits DIRECTLY ABOVE the T (Titre) button, same left edge, same size; follows T if the layout moves
   (function () {
-    var b = $('b-tools');
+    var b = $('b-set');
     try { localStorage.removeItem('toolsPos'); } catch (e) { /* old drag position, no longer used */ }
     function dock() {
       var t = $('l-cap').getBoundingClientRect(), P = (b.offsetParent || document.body).getBoundingClientRect();
@@ -838,7 +838,6 @@
       b.style.left = Math.round(t.left - P.left) + 'px'; b.style.top = Math.round(t.top - P.top - 40 - 8) + 'px';
     }
     dock(); addEventListener('resize', dock); setInterval(dock, 500);
-    b.onclick = toolbox;
   })();
   $('b-set').onclick = settingsModal;
 
@@ -1315,7 +1314,7 @@
       row('', 'Aide', function () { viaSub('help'); });
       document.body.appendChild(panel);
     }
-    // the main ⋯ button (right rail, under Save) opens this panel, with or without an active clip. The left ⋮ (b-tools) keeps its own toolbox.
+    // the main ⋯ button (right rail, under Save) opens this panel, with or without an active clip. The top-left button is Settings (b-set).
     $('r-more').onclick = function (e) { if (e) e.stopPropagation(); open(); };   // MAIN ⋯ button (right rail) opens the full panel
   })();
 
