@@ -26,6 +26,12 @@
 
   // /arena-clips opens the same feed as / (direct link to Arena Clips)
   var PATHN = function () { return location.pathname.replace(/^\/arena-clips(?=\/|$)/i, '') || '/'; };
+  // Entered through /arena-clips (any letter case)? Every in-app URL keeps that prefix, so tabs, refresh (F5) and shared links stay on the same entry link.
+  var PFX = (/^\/arena-clips(?=\/|$)/i.exec(location.pathname) || [''])[0];
+  var U = function (path) {
+    if (!PFX || /^[a-z][a-z0-9+.-]*:|^\/\//i.test(path) || path.slice(0, PFX.length).toLowerCase() === PFX.toLowerCase() && /^[/?#]|^$/.test(path.slice(PFX.length))) return path;
+    return path === '/' ? PFX : PFX + (path.charAt(0) === '/' ? path : '/' + path);
+  };
   var SITE = (document.querySelector('meta[name=arena-site]') || {}).content || 'https://gdnaarena.app/';
 
   /* ================= helpers ================= */
@@ -69,7 +75,7 @@
   }
   function closeOverlay() { if (ov) history.back(); }
   function nav(path, o) {
-    o = o || {};
+    o = o || {}; path = U(path);
     if (ov) { dropOv(); history.replaceState({ i: depth() }, '', path); }
     else if (o.replace) history.replaceState({ i: depth() }, '', path);
     else if (path !== location.pathname + location.search) { history.pushState({ i: depth() + 1 }, '', path); maxI = depth(); }
@@ -931,12 +937,12 @@
     syncSearchUi(); clearTimeout(sT);
     sT = setTimeout(function () {
       var q = qEl.value.trim(), url = '/search' + (q ? '?q=' + encodeURIComponent(q) : '');
-      if (PATHN() === '/search') { history.replaceState(history.state, '', url); searchPage(q); } else nav(url);
+      if (PATHN() === '/search') { history.replaceState(history.state, '', U(url)); searchPage(q); } else nav(url);
     }, 200);
   });
   qEl.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Escape') qEl.blur(); });
-  $('search-form').onsubmit = function (e) { e.preventDefault(); clearTimeout(sT); var q = qEl.value.trim(), url = '/search' + (q ? '?q=' + encodeURIComponent(q) : ''); if (PATHN() === '/search') { history.replaceState(history.state, '', url); searchPage(q); } else nav(url); qEl.blur(); };
-  $('q-clear').onclick = function () { qEl.value = ''; syncSearchUi(); if (PATHN() === '/search') { history.replaceState(history.state, '', '/search'); searchPage(''); } qEl.focus(); };
+  $('search-form').onsubmit = function (e) { e.preventDefault(); clearTimeout(sT); var q = qEl.value.trim(), url = '/search' + (q ? '?q=' + encodeURIComponent(q) : ''); if (PATHN() === '/search') { history.replaceState(history.state, '', U(url)); searchPage(q); } else nav(url); qEl.blur(); };
+  $('q-clear').onclick = function () { qEl.value = ''; syncSearchUi(); if (PATHN() === '/search') { history.replaceState(history.state, '', U('/search')); searchPage(''); } qEl.focus(); };
 
   /* ---- clips grid ---- */
   function clipsPage() {
@@ -1281,7 +1287,8 @@
         b.onclick = function () { S[key] = !S[key]; paint(); save(); if (after) after(); }; panel.appendChild(b);
       }
       var soon = function () { toast('Bientôt disponible'); };
-      var needClip = function (fn) { return function () { if (!cur()) { toast('Ouvrez un clip'); return; } fn(); }; };
+      var feedNow = function () { var q = PATHN(); return q === '/' || /^\/c\//.test(q); };
+      var needClip = function (fn) { return function () { if (!cur() || !feedNow()) { toast('Ouvrez un clip'); return; } fn(); }; };
 
       // 2. account / app settings
       [['languages', 'Langue', 'lang'], ['gauge', 'Qualité vidéo', 'quality'], ['bell', 'Notifications', 'notif'], ['user-round', 'Compte', 'account'], ['lock', 'Confidentialité', 'privacy'], ['palette', 'Thème', 'theme']]
