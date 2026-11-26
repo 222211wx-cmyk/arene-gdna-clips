@@ -45,6 +45,17 @@
   .invisible{visibility:hidden}
   #phone.light{filter:invert(1) hue-rotate(180deg)}
   #phone.light video,#phone.light img{filter:invert(1) hue-rotate(180deg)}
+  /* Arena-Clips UI polish: contrast + glass controls (CSS only, no logic changes) */
+  :root{--ac-gold:#facc15;--ac-glass:rgba(15,15,15,.45);--ac-glass-border:rgba(255,255,255,.14)}
+  .rail-btn svg,#b-tools svg{filter:drop-shadow(0 2px 6px rgba(0,0,0,.85))}
+  #l-rail .rail-btn,#r-snd,#b-tools{background:var(--ac-glass)!important;border:1px solid var(--ac-glass-border);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 2px 8px rgba(0,0,0,.75);transition:transform .15s ease,background .15s ease}
+  #l-rail .rail-btn:active,#r-snd:active,#b-tools:active{transform:scale(.92);background:rgba(255,255,255,.18)!important}
+  #views{background:var(--ac-glass)!important;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);border:1px solid var(--ac-glass-border)}
+  #l-eq-t{border-color:var(--ac-gold)!important}
+  #up-open{box-shadow:0 4px 14px rgba(250,204,21,.35);transition:transform .15s ease}
+  #up-open:active{transform:scale(.95)}
+  #tab-clips{letter-spacing:.4px}
+  .tab{color:#a1a1aa}.tab.active{color:var(--ac-gold);font-weight:700}
 </style>
 </head>
 <body>
@@ -56,8 +67,8 @@
   <div id="txt-ov" class="pointer-events-none absolute inset-x-6 top-[58%] z-10 text-center text-2xl font-extrabold leading-tight text-white" style="text-shadow:0 2px 8px #000" aria-hidden="true"></div>
   <div id="wm-ov" hidden class="pointer-events-none absolute right-16 z-10 text-xs font-bold text-white/60 bottom-[calc(env(safe-area-inset-bottom)+112px)]" aria-hidden="true"></div>
   <div id="acc-ov" class="pointer-events-none absolute left-1/2 top-[38%] z-10 -translate-x-1/2 whitespace-nowrap text-5xl" aria-hidden="true"></div>
-  <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/60 to-transparent"></div>
-  <div class="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
+  <div class="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/70 to-transparent"></div>
+  <div class="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-black/90 via-black/35 to-transparent"></div>
   <div id="empty" class="absolute inset-0 hidden items-center justify-center px-8 text-center text-white/80">Aucun clip pour le moment. Appuyez sur Importer pour publier le premier.</div>
 
   <!-- Fixed top bar on every page: [ < ] [ Home ] [ Arena Clips ] [ > ] [ X ], then the one search bar + Importer -->
