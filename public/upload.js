@@ -7,6 +7,7 @@ const extOf = (f) => { const e = (f.name.split('.').pop() || '').toLowerCase(); 
 const CAMERA = /\b(?:VID|IMG|MOV|MVI|PXL|DSC|PIC|WA|Screen[ _-]?Recording)[-_ ]*\d/i;
 const guessTitle = (f) => { const t = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim(); return CAMERA.test(t) || /^[\d\s.]+$/.test(t) ? '' : t; };
 const $ = (id) => document.getElementById(id);
+const toast = (m) => { const t = window.__arena && window.__arena.toast; if (t) t(m); else { const el = $('toast'); if (el) { el.textContent = m; el.hidden = false; setTimeout(() => { el.hidden = true; }, 2600); } } };
 const mb = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
 const originals = new Map();   // clip key -> original File (this device, this session only)
 let busy = false;
@@ -53,9 +54,12 @@ $('st-tabs').onclick = (e) => {
 
 /* ---------- file chosen -> studio ---------- */
 $('up-file').onchange = async (e) => {
-  const file = e.target.files[0]; e.target.value = '';
-  if (!file || busy) return;
-  if (!extOf(file)) { setProgress('❌ Format non supporté: vidéo mp4, mov, webm ou archive zip, 7z, rar, tar, gz', 0); return; }
+  let file = e.target.files[0]; if (!file) return;
+  if (busy) { e.target.value = ''; return toast('Un envoi est en cours, patientez un instant'); }
+  // some Android browsers give a video with an empty name extension: trust its MIME type
+  if (!extOf(file) && /^video\//.test(file.type)) { try { file = new File([file], (file.name || 'video') + '.mp4', { type: 'video/mp4' }); } catch {} }
+  e.target.value = '';   // reset only after the File is safely held, so choosing the same file again still fires
+  if (!extOf(file)) { toast('❌ Format non supporté: vidéo mp4, mov, webm ou archive zip, 7z, rar, tar, gz'); return; }
   if (ARCH.includes(extOf(file))) return importArchive(file);
   resetStudio(file);
   pv.src = URL.createObjectURL(file);
