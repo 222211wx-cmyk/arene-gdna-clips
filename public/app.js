@@ -24,6 +24,10 @@
     };
   })();
 
+  // /arena-clips opens the same feed as / (direct link to Arena Clips)
+  var PATHN = function () { return location.pathname.replace(/^\/arena-clips(?=\/|$)/, '') || '/'; };
+  var SITE = (document.querySelector('meta[name=arena-site]') || {}).content || 'https://gdnaarena.app/';
+
   /* ================= helpers ================= */
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var icons = function () { if (window.lucide) window.lucide.createIcons(); };
@@ -74,9 +78,9 @@
   function goBack() { if (ov) closeOverlay(); else if (depth() > 0) history.back(); else nav('/', { replace: true }); }
   window.addEventListener('popstate', function () { if (ov) { dropOv(); maxI = depth(); updateBar(); return; } render(); });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') { if (ov) closeOverlay(); else if (location.pathname !== '/') goBack(); return; }
+    if (e.key === 'Escape') { if (ov) closeOverlay(); else if (PATHN() !== '/') goBack(); return; }
     if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || ov) return;
-    if (location.pathname === '/' || viewer) { if (e.key === 'ArrowDown') go(1); if (e.key === 'ArrowUp') go(-1); }
+    if (PATHN() === '/' || viewer) { if (e.key === 'ArrowDown') go(1); if (e.key === 'ArrowUp') go(-1); }
   });
 
   /* modal (X on all of them) */
@@ -98,7 +102,8 @@
 
   /* ================= session ================= */
   function refreshMe() {
-    return api('GET', '/api/me').then(function (r) { me = r.user; unread = r.unread || 0; badge(); paintEq(); }).catch(function () { me = null; });
+    // only an explicit 401 means signed out: a network blip or a 5xx keeps the session (the user is never asked to log in again for that)
+    return api('GET', '/api/me').then(function (r) { me = r.user; unread = r.unread || 0; badge(); paintEq(); }).catch(function (e) { if (e && e.auth) me = null; });
   }
   function badge() { var b = $('msg-badge'), n = me && me.settings.notifications ? unread : 0; b.hidden = !n; b.textContent = n > 99 ? '99+' : n; }
   setInterval(function () { if (me && !document.hidden) refreshMe(); }, 30000);
@@ -223,6 +228,7 @@
     paint(); updateBar();
     if (dir) { v.classList.remove('slide-up', 'slide-down'); void v.offsetWidth; v.classList.add(dir > 0 ? 'slide-up' : 'slide-down'); }
   }
+  window.paint = function () { paint(); };
   function paint() {
     var c = cur(), empty = $('empty');
     if (!c) { empty.classList.remove('hidden'); empty.classList.add('flex'); return; }
@@ -239,7 +245,7 @@
     var f = $('follow'); f.hidden = !!mine; f.textContent = vw.following ? 'Abonné ✓' : vw.requested ? 'Demandé' : 'Suivre'; f.classList.toggle('bg-white', !!vw.following); f.classList.toggle('text-black', !!vw.following);
     $('views-n').textContent = fmtN(c.views || 0); $('acc-ov').textContent = (c.accessories || []).join(' ');
     $('txt-ov').textContent = c.overlayText || ''; var wm = $('wm-ov'); wm.hidden = !c.watermark; wm.textContent = '@' + ((c.author && c.author.handle) || '') + ' · Arena Clips';
-    v.style.filter = (FILTERS[c.filter || ''] || FILTERS[''])[1]; buf.style.filter = '';
+    v.style.filter = ((FILTERS[c.filter || ''] || FILTERS[''])[1] + (isLight ? ' invert(1) hue-rotate(180deg)' : '')).trim(); buf.style.filter = '';
     if (c.id !== lastHist) { lastHist = c.id; rememberClip(c); }
     $('t-msg').disabled = !!mine; $('t-msg').classList.toggle('opacity-40', !!mine);
   }
@@ -260,7 +266,7 @@
   function updateBar() {
     dis($('b-prev'), !(ov || canClip(-1) || canHist(-1)));
     dis($('b-next'), !(!ov && (canClip(1) || canHist(1))));
-    dis($('b-x'), !ov && location.pathname === '/');
+    dis($('b-x'), !ov && PATHN() === '/');
   }
   // on the feed or the viewer the arrows step through clips; on other pages (and at the ends) they walk the history
   function prevNext(d) {
@@ -270,7 +276,7 @@
   $('b-prev').onclick = function () { prevNext(-1); };
   $('b-next').onclick = function () { prevNext(1); };
   // X closes the open sheet, else the clip viewer, else leaves the page for the feed; it never closes the site
-  $('b-x').onclick = function () { if (ov) closeOverlay(); else if (viewer) goBack(); else if (location.pathname !== '/') nav('/'); };
+  $('b-x').onclick = function () { if (ov) closeOverlay(); else if (viewer) goBack(); else if (PATHN() !== '/') nav('/'); };
 
   // swipe right = previous, swipe left = next (anywhere except inputs and horizontally scrolling rows)
   var sx = null, sy = 0;
@@ -451,6 +457,64 @@
       $('d-f').onsubmit = function (e) { e.preventDefault(); api('DELETE', '/api/me', { password: $('d-p').value }).then(function () { tokSet(''); me = null; unread = 0; badge(); return reloadFeed(); }).then(function () { nav('/signup', { replace: true }); toast('Compte supprimé'); }).catch(function (err) { $('d-err').textContent = err.message; }); };
   }
 
+
+  /* ================= Settings hub: the SAME seven entries in the ⋮ toolbox, the Settings button and /settings ================= */
+  var SET_ROWS = [['lang', 'languages', 'Langue'], ['quality', 'gauge', 'Qualité vidéo'], ['notif', 'bell', 'Notifications'], ['account', 'user-round', 'Compte'], ['privacy', 'lock', 'Confidentialité'], ['theme', 'palette', 'Thème'], ['help', 'life-buoy', 'Aide']];
+  var isLight = false;
+  function applyTheme() {
+    var t = 'dark'; try { t = localStorage.getItem('theme') || 'dark'; } catch (e) { /* ignore */ }
+    isLight = t === 'light' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches);
+    $('phone').classList.toggle('light', isLight); document.body.style.background = isLight ? '#fff' : '#000';
+    if (window.paint) window.paint();
+  }
+  var headB = function (t, back) { return '<div class="mb-3 flex items-center gap-2"><button data-bk class="flex h-11 items-center gap-1 rounded-full bg-neutral-800 px-3 text-sm font-bold"><i data-lucide="chevron-left" class="h-5 w-5"></i>Retour</button><h2 class="min-w-0 flex-1 truncate text-center text-lg font-extrabold">' + t + '</h2><button data-x aria-label="Fermer" class="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-lg">✕</button></div>'; };
+  function setHint(k) {
+    var st = me ? me.settings : {};
+    if (k === 'lang') return '<span data-notr>' + esc(I18N.name(I18N.get())) + '</span>';
+    if (k === 'quality') return quality() === 'saver' ? 'Économiseur' : 'Auto';
+    if (k === 'notif') return me ? (st.notifications ? 'Activées' : 'Désactivées') : '';
+    if (k === 'account') return me ? '<span data-notr>@' + esc(me.handle) + '</span>' : 'Non connecté';
+    if (k === 'privacy') return me ? (st.private_profile ? 'Privé' : 'Public') : '';
+    if (k === 'theme') { var t = 'dark'; try { t = localStorage.getItem('theme') || 'dark'; } catch (e) { /* ignore */ } return { dark: 'Sombre', light: 'Clair', auto: 'Automatique' }[t] || ''; }
+    return '';
+  }
+  function settingsRows() {
+    return SET_ROWS.map(function (r) { return '<button data-set="' + r[0] + '" class="flex w-full items-center gap-3 rounded-xl bg-neutral-800 p-3 text-left text-sm"><i data-lucide="' + r[1] + '" class="h-5 w-5 shrink-0 text-amber-400"></i><span class="flex-1 font-bold">' + r[2] + '</span><span class="text-xs text-neutral-400">' + setHint(r[0]) + '</span><i data-lucide="chevron-right" class="h-4 w-4 shrink-0 text-neutral-500"></i></button>'; }).join('');
+  }
+  function bindSettingsRows(root, back) {
+    root.querySelectorAll('[data-set]').forEach(function (b) { b.onclick = function () { setSub(b.dataset.set, back); }; });
+  }
+  function settingsModal() { openModal(head('Paramètres') + '<div class="flex flex-col gap-2">' + settingsRows() + '</div>'); bindSettingsRows(modal, settingsModal); }
+  var setOpt = function (attr, val, on, t, d) { return '<button ' + attr + '="' + val + '" role="radio" aria-checked="' + on + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (on ? 'bg-amber-400 text-black' : 'bg-neutral-800') + '"><span><b>' + t_(t) + '</b>' + (d ? '<span class="block text-xs ' + (on ? 'text-black/70' : 'text-neutral-400') + '">' + d + '</span>' : '') + '</span>' + (on ? '<span aria-hidden="true">✓</span>' : '') + '</button>'; };
+  var t_ = function (x) { return x; };
+  var setSw = function (k, t, d, on) { return '<div class="flex items-center justify-between gap-3 rounded-xl bg-neutral-800 p-3"><div class="text-sm"><b>' + t + '</b><div class="text-xs text-neutral-400">' + d + '</div></div><button role="switch" data-sk="' + k + '" aria-checked="' + !!on + '" aria-label="' + t + '" class="relative h-7 w-12 shrink-0 rounded-full ' + (on ? 'bg-amber-400' : 'bg-neutral-600') + '"><span class="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ' + (on ? 'left-[22px]' : 'left-0.5') + '"></span></button></div>'; };
+  var loginPrompt = function (m) { return '<div class="rounded-xl bg-neutral-800 p-4 text-sm text-neutral-300"><p class="mb-3">' + m + '</p><div class="flex gap-2"><button id="sl-in" class="' + btn + ' flex-1">Se connecter</button><button id="sl-up" class="' + btn2 + ' flex-1">Créer un compte</button></div></div>'; };
+  function setSub(k, back) {
+    var title = SET_ROWS.filter(function (r) { return r[0] === k; })[0][2], again = function () { setSub(k, back); }, body = '', st = me ? me.settings : {};
+    if (k === 'lang') body = '<div role="radiogroup" class="flex flex-col gap-2">' + I18N.LANGS.map(function (l) { return setOpt('data-lg', l[0], I18N.get() === l[0], '<span data-notr>' + l[1] + '</span>', ''); }).join('') + '</div><p class="mt-3 text-xs text-neutral-400">Le changement est immédiat, sans recharger l’appli.</p>';
+    else if (k === 'quality') body = '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-sq', 'auto', quality() === 'auto', 'Auto', '720p, 360p si le réseau ralentit') + setOpt('data-sq', 'saver', quality() === 'saver', 'Économiseur de données', 'Toujours 360p') + '</div>';
+    else if (k === 'notif') body = me ? setSw('notifications', 'Notifications', 'Pastille de nouveaux messages', st.notifications) + '<div class="h-2"></div>' + setSw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire', st.allow_messages) : loginPrompt('Connectez-vous pour régler les notifications.');
+    else if (k === 'account') body = me ? '<div class="flex flex-col gap-2"><div class="rounded-xl bg-neutral-800 p-3 text-sm"><div class="text-xs text-neutral-400">E-mail</div><span data-notr>' + esc(me.email) + '</span></div><form id="ts-name" class="flex gap-2" action="javascript:void(0)"><input id="ts-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Enregistrer</button></form><button id="st-out" class="' + btn2 + ' w-full">Déconnexion</button><button id="tb-del2" class="w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button></div>' : loginPrompt('Vous n’êtes pas connecté. Vous ne vous connectez qu’une seule fois : l’appli vous garde connecté ensuite.');
+    else if (k === 'privacy') body = me ? '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-pp', 'false', !st.private_profile, 'Profil public', 'Tout le monde voit vos clips') + setOpt('data-pp', 'true', !!st.private_profile, 'Profil privé', 'Seuls vos abonnés acceptés voient vos clips') + '</div><div class="mt-2">' + setSw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire', st.allow_messages) + '</div>' : loginPrompt('Connectez-vous pour choisir la confidentialité de votre profil.');
+    else if (k === 'theme') { var th = 'dark'; try { th = localStorage.getItem('theme') || 'dark'; } catch (e) { /* ignore */ } body = '<div role="radiogroup" class="flex flex-col gap-2">' + setOpt('data-th', 'dark', th === 'dark', 'Sombre', '') + setOpt('data-th', 'light', th === 'light', 'Clair', '') + setOpt('data-th', 'auto', th === 'auto', 'Automatique', 'Suit votre téléphone') + '</div>'; }
+    else body = '<div class="flex flex-col gap-2 text-sm">' + [['Comment publier un clip ?', 'Touchez Importer, choisissez ou enregistrez une vidéo, réglez le montage et l’audio, puis Publier.'], ['Dois-je me reconnecter à chaque clip ?', 'Non. Vous vous connectez une seule fois : la session est gardée sur cet appareil.'], ['Comment retirer le son d’origine ?', 'Dans le studio, onglet Audio : « Supprimer l’audio original », puis ajoutez musique, voix ou effets.'], ['L’IA est-elle obligatoire ?', 'Non. Le réel est par défaut ; l’option « Synchroniser avec AI / Robot » est désactivée tant que vous ne l’activez pas.'], ['Mes fichiers sont lourds (100 Mo, 200 Mo…)', 'L’envoi se fait par morceaux et reprend tout seul si la connexion coupe.']].map(function (q) { return '<details class="rounded-xl bg-neutral-800 p-3"><summary class="cursor-pointer font-bold">' + q[0] + '</summary><p class="mt-2 text-neutral-300">' + q[1] + '</p></details>'; }).join('') + '<div class="mt-1 text-center text-xs text-neutral-500" data-notr>' + esc(BASE) + '</div></div>';
+    openModal(headB(title) + body);
+    var bk = modal.querySelector('[data-bk]'); bk.onclick = function () { if (back === closeOverlay) closeOverlay(); else back(); };
+    modal.querySelectorAll('[data-lg]').forEach(function (b) { b.onclick = function () { I18N.set(b.dataset.lg); if (me) api('PATCH', '/api/me', { language: b.dataset.lg }).catch(function () { /* optional */ }); again(); }; });
+    modal.querySelectorAll('[data-sq]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('quality', b.dataset.sq); sessionStorage.removeItem('rend'); } catch (e) { /* ignore */ } shownId = null; again(); toast('Enregistré'); }; });
+    modal.querySelectorAll('[data-th]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('theme', b.dataset.th); } catch (e) { /* ignore */ } applyTheme(); again(); }; });
+    modal.querySelectorAll('[data-sk]').forEach(function (b) { b.onclick = function () { var kk = b.dataset.sk, p = {}; p[kk] = !me.settings[kk]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (kk === 'notifications') badge(); again(); }).catch(fail); }; });
+    modal.querySelectorAll('[data-pp]').forEach(function (b) { b.onclick = function () { api('PATCH', '/api/me', { private_profile: b.dataset.pp === 'true' }).then(function (r) { me = r.user; again(); }).catch(fail); }; });
+    var f = $('ts-name'); if (f) f.onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('ts-dn').value }).then(function (r) { me = r.user; paintEq(); toast('Nom enregistré'); }).catch(fail); };
+    if ($('st-out')) $('st-out').onclick = function () { logout(); };
+    if ($('tb-del2')) $('tb-del2').onclick = deleteAccountModal;
+    if ($('sl-in')) $('sl-in').onclick = function () { nav('/login?next=' + encodeURIComponent(location.pathname)); };
+    if ($('sl-up')) $('sl-up').onclick = function () { nav('/signup?next=' + encodeURIComponent(location.pathname)); };
+  }
+  // the globe next to Retour: language list only
+  function languagePicker() { setSub('lang', closeOverlay); }
+  applyTheme();
+
   /* ================= Toolbox (⋮ under Home): clip tools + profile / account tools ================= */
   var zoomK = 1, zx = 0, zy = 0, ZSTEPS = [1, 1.5, 2];
   function zoomApply() {
@@ -499,10 +563,10 @@
     var f = $('ts-name'); if (f) f.onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('ts-dn').value }).then(function (r) { me = r.user; paintEq(); toast('Nom enregistré'); }).catch(fail); };
   }
   function toolbox() {
-    var c = viewer || location.pathname === '/' ? cur() : null, mine = isMine(c), none = !c ? 'Ouvrez un clip' : '';
+    var c = viewer || PATHN() === '/' ? cur() : null, mine = isMine(c), none = !c ? 'Ouvrez un clip' : '';
     var dl = c && (c.allowDownload !== false || mine);
     var own = function (sub) { return c ? (mine ? sub : 'Réservé au propriétaire') : none; };
-    openModal(head('Boîte à outils') + '<div class="flex flex-col gap-2">' + '<h3 class="mb-0 text-xs font-bold uppercase text-neutral-400">Éditer le clip</h3>' +
+    openModal(head('Boîte à outils') + '<div class="flex flex-col gap-2">' + '<h3 class="mb-0 text-xs font-bold uppercase text-neutral-400">Paramètres</h3>' + settingsRows() + tgroup('Éditer le clip') +
       tbtn('tb-desc', '📝', 'Description et titre', own('Titre, description, Coller'), !c || !mine) +
       tbtn('tb-text', '🔤', 'Texte sur le clip', own('Afficher un texte sur la vidéo'), !c || !mine) +
       tbtn('tb-acc', '✨', 'Accessoires et emoji', own('Autocollants emoji sur le clip'), !c || !mine) +
@@ -528,7 +592,6 @@
       tbtn('tb-hist', '🕘', 'Historique', 'Derniers clips vus sur cet appareil') +
       tbtn('tb-prof', '👤', 'Profil : modifier, bio, photo', me ? '@' + esc(me.handle) : 'Se connecter pour voir son profil') +
       tbtn('tb-priv', '🔒', 'Confidentialité : ' + (me ? (me.settings.private_profile ? 'Privé' : 'Public') : 'Public / Privé'), me ? 'Toucher pour passer en ' + (me.settings.private_profile ? 'Public' : 'Privé') : 'Connexion requise') +
-      tgroup('Paramètres') + settingsBox() +
       tbtn('tb-out', '🚪', me ? 'Déconnexion' : 'Connexion', me ? 'Quitter ce compte' : 'Se connecter') + '</div>');
     var on = function (id, fn) { var b = $(id); if (b) b.onclick = fn; };
 
@@ -610,8 +673,7 @@
       if (!me) return needLogin('Connectez-vous pour choisir la confidentialité de votre profil.');
       api('PATCH', '/api/me', { private_profile: !me.settings.private_profile }).then(function (r) { me = r.user; toolbox(); toast('Profil : ' + (me.settings.private_profile ? 'Privé' : 'Public')); }).catch(fail);
     });
-    bindSettings(toolbox);
-    on('tb-del2', deleteAccountModal);
+    bindSettingsRows(modal, toolbox);
     on('tb-out', function () { if (me) logout(); else nav('/login'); });
   }
   // ⋮ sits DIRECTLY ABOVE the T (Titre) button, same left edge, same size; follows T if the layout moves
@@ -637,7 +699,7 @@
     shownId = null; v.pause(); delete v.dataset.id; delete buf.dataset.id;
     if (viewer && nextC && nextC.id !== c.id) return nav('/c/' + encodeURIComponent(nextC.id), { replace: true });
     feedI = Math.min(at, Math.max(0, feedClips.length - 1)); idx = feedI;
-    if (location.pathname !== '/') return nav('/', { replace: true });
+    if (PATHN() !== '/') return nav('/', { replace: true });
     nav('/', { replace: true });
   }
 
@@ -658,6 +720,8 @@
   /* ================= upload sheet (studio itself lives in upload.js) ================= */
   var sheet = $('up-sheet');
   function openUpload() {
+    // already signed in: straight to the studio. Not loaded yet (slow start): refresh silently first, ask to log in only if the server says so
+    if (!me && tokGet()) return refreshMe().then(function () { if (me) openUpload(); else needLogin('Connectez-vous pour publier un clip.'); });
     if (!me) return needLogin('Connectez-vous pour publier un clip.');
     openOverlay(function () { sheet.hidden = true; }); sheet.hidden = false;
   }
@@ -693,7 +757,7 @@
   function bindClips(root, list) { root.querySelectorAll('[data-id]').forEach(function (b) { b.onclick = function () { openViewer(list, b.dataset.id); }; }); }
   function setPage(html) { page.innerHTML = html; page.scrollTop = 0; icons(); }
   function openViewer(list, id) { vlist = list.slice(); nav('/c/' + encodeURIComponent(id)); }
-  function authCta(t) { setPage(pageHead(t) + '<div class="rounded-2xl bg-neutral-900 p-5 text-center"><p class="mb-4 text-sm text-neutral-300">Connectez-vous pour accéder à cette page.</p><div class="flex gap-2"><button id="cta-in" class="' + btn + ' flex-1">Se connecter</button><button id="cta-up" class="' + btn2 + ' flex-1">Créer un compte</button></div></div>'); var n = encodeURIComponent(location.pathname); $('cta-in').onclick = function () { nav('/login?next=' + n); }; $('cta-up').onclick = function () { nav('/signup?next=' + n); }; }
+  function authCta(t) { setPage(pageHead(t) + '<div class="rounded-2xl bg-neutral-900 p-5 text-center"><p class="mb-4 text-sm text-neutral-300">Connectez-vous pour accéder à cette page.</p><div class="flex gap-2"><button id="cta-in" class="' + btn + ' flex-1">Se connecter</button><button id="cta-up" class="' + btn2 + ' flex-1">Créer un compte</button></div></div>'); var n = encodeURIComponent(PATHN()); $('cta-in').onclick = function () { nav('/login?next=' + n); }; $('cta-up').onclick = function () { nav('/signup?next=' + n); }; }
 
   /* ---- search: one bar, title + caption + tags + creator, accent-insensitive, live ---- */
   var sT, sSeq = 0, qEl = $('q');
@@ -720,12 +784,12 @@
     syncSearchUi(); clearTimeout(sT);
     sT = setTimeout(function () {
       var q = qEl.value.trim(), url = '/search' + (q ? '?q=' + encodeURIComponent(q) : '');
-      if (location.pathname === '/search') { history.replaceState(history.state, '', url); searchPage(q); } else nav(url);
+      if (PATHN() === '/search') { history.replaceState(history.state, '', url); searchPage(q); } else nav(url);
     }, 200);
   });
   qEl.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Escape') qEl.blur(); });
-  $('search-form').onsubmit = function (e) { e.preventDefault(); clearTimeout(sT); var q = qEl.value.trim(), url = '/search' + (q ? '?q=' + encodeURIComponent(q) : ''); if (location.pathname === '/search') { history.replaceState(history.state, '', url); searchPage(q); } else nav(url); qEl.blur(); };
-  $('q-clear').onclick = function () { qEl.value = ''; syncSearchUi(); if (location.pathname === '/search') { history.replaceState(history.state, '', '/search'); searchPage(''); } qEl.focus(); };
+  $('search-form').onsubmit = function (e) { e.preventDefault(); clearTimeout(sT); var q = qEl.value.trim(), url = '/search' + (q ? '?q=' + encodeURIComponent(q) : ''); if (PATHN() === '/search') { history.replaceState(history.state, '', url); searchPage(q); } else nav(url); qEl.blur(); };
+  $('q-clear').onclick = function () { qEl.value = ''; syncSearchUi(); if (PATHN() === '/search') { history.replaceState(history.state, '', '/search'); searchPage(''); } qEl.focus(); };
 
   /* ---- clips grid ---- */
   function clipsPage() {
@@ -955,25 +1019,9 @@
 
   /* ---- settings ---- */
   function settingsPage() {
-    var q = quality(), s = me ? me.settings : {};
-    var qBtn = function (v, t, d) { return '<button data-q="' + v + '" role="radio" aria-checked="' + (q === v) + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (q === v ? 'bg-amber-400 text-black' : 'bg-neutral-900') + '"><span><b>' + t + '</b><span class="block text-xs ' + (q === v ? 'text-black/70' : 'text-neutral-400') + '">' + d + '</span></span><span>' + (q === v ? '✓' : '') + '</span></button>'; };
-    var qSec = '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Qualité vidéo</h3><div id="s-q" role="radiogroup" class="mb-5 flex flex-col gap-2">' + qBtn('auto', 'Auto', '720p, passe en 360p si le réseau ralentit') + qBtn('saver', 'Économiseur de données', 'Toujours 360p') + '</div>';
-    var bindQ = function () { page.querySelectorAll('[data-q]').forEach(function (b) { b.onclick = function () { try { localStorage.setItem('quality', b.dataset.q); sessionStorage.removeItem('rend'); } catch (e) { /* ignore */ } shownId = null; settingsPage(); }; }); };
-    if (!me) { setPage(pageHead('Paramètres') + qSec); bindQ(); return; }
-    var sw = function (k, t, d) { return '<div class="flex items-center justify-between gap-3 rounded-xl bg-neutral-900 p-3"><div class="text-sm"><b>' + t + '</b><div class="text-xs text-neutral-400">' + d + '</div></div><button role="switch" data-k="' + k + '" aria-checked="' + !!s[k] + '" aria-label="' + t + '" class="relative h-7 w-12 shrink-0 rounded-full ' + (s[k] ? 'bg-amber-400' : 'bg-neutral-700') + '"><span class="absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ' + (s[k] ? 'left-[22px]' : 'left-0.5') + '"></span></button></div>'; };
-    setPage(pageHead('Paramètres') + qSec +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Compte</h3><div class="mb-5 flex flex-col gap-2"><div class="rounded-xl bg-neutral-900 p-3 text-sm"><div class="text-xs text-neutral-400">E-mail</div>' + esc(me.email) + '</div><form id="s-name" class="flex gap-2" action="javascript:void(0)"><input id="s-dn" maxlength="40" value="' + esc(me.name) + '" aria-label="Nom affiché" class="' + field + '"><button class="' + btn + '">Enregistrer</button></form></div>' +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Langue</h3><div class="mb-5"><select id="s-lang" aria-label="Langue" class="' + inp + '"><option value="fr" selected>Français</option></select></div>' +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Notifications</h3><div class="mb-5">' + sw('notifications', 'Notifications', 'Pastille de nouveaux messages sur l’onglet Messages') + '</div>' +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Confidentialité</h3><div class="mb-5 flex flex-col gap-2">' + '<div role="radiogroup" aria-label="Visibilité du profil" class="flex flex-col gap-2">' + [[false, 'Public', 'Tout le monde voit votre profil et votre galerie'], [true, 'Privé', 'Vous seul voyez tout ; les autres envoient une demande de suivi que vous acceptez ou refusez']].map(function (o) { var on = !!s.private_profile === o[0]; return '<button data-pp="' + o[0] + '" role="radio" aria-checked="' + on + '" class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm ' + (on ? 'bg-amber-400 text-black' : 'bg-neutral-900') + '"><span><b>' + o[1] + '</b><span class="block text-xs ' + (on ? 'text-black/70' : 'text-neutral-400') + '">' + o[2] + '</span></span><span>' + (on ? '✓' : '') + '</span></button>'; }).join('') + '</div>' + sw('allow_messages', 'Autoriser les messages', 'Les autres membres peuvent vous écrire') + '</div>' +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-neutral-400">Session</h3><button id="s-out" class="' + btn2 + ' mb-5 w-full">Se déconnecter</button>' +
-      '<h3 class="mb-2 text-xs font-bold uppercase text-red-400">Zone dangereuse</h3><button id="s-del" class="w-full rounded-full border border-red-500 px-5 py-2.5 text-sm font-bold text-red-400">Supprimer mon compte</button>');
-    bindQ();
-    page.querySelectorAll('[data-k]').forEach(function (b) { b.onclick = function () { var k = b.dataset.k, p = {}; p[k] = !me.settings[k]; api('PATCH', '/api/me', p).then(function (r) { me = r.user; if (k === 'notifications') badge(); settingsPage(); }).catch(fail); }; });
-    page.querySelectorAll('[data-pp]').forEach(function (b) { b.onclick = function () { api('PATCH', '/api/me', { private_profile: b.dataset.pp === 'true' }).then(function (r) { me = r.user; settingsPage(); }).catch(fail); }; });
-    $('s-name').onsubmit = function (e) { e.preventDefault(); api('PATCH', '/api/me', { display_name: $('s-dn').value }).then(function (r) { me = r.user; toast('Nom enregistré'); }).catch(fail); };
-    $('s-out').onclick = logout;
-    $('s-del').onclick = deleteAccountModal;
+    setPage(pageHead('Paramètres') + '<div class="flex flex-col gap-2">' + settingsRows() + '</div>' + (me ? '<button id="s-out" class="' + btn2 + ' mt-4 w-full">Déconnexion</button>' : ''));
+    bindSettingsRows(page, closeOverlay);
+    if ($('s-out')) $('s-out').onclick = logout;
   }
 
   /* ================= router ================= */
@@ -987,7 +1035,7 @@
   }
   function render() {
     if (!ready) return;
-    var p = location.pathname, q = new URLSearchParams(location.search), m;
+    var p = PATHN(), q = new URLSearchParams(location.search), m;
     viewer = false; if (hideModalIfStale()) { /* no-op */ }
     if (p !== '/search' && p !== '/c' && !/^\/c\//.test(p)) { /* keep search text only on search */ }
     if (p === '/search') qEl.value = q.get('q') || ''; syncSearchUi();
@@ -1019,7 +1067,8 @@
 
   /* chrome: Home, logo, back, close, bottom nav */
   $('b-home').onclick = function () { nav('/'); };
-  $('logo').onclick = function () { nav('/'); };
+  $('logo').onclick = function () { location.href = SITE; };   // the GDNA ARENA logo leads to the full official site
+  $('b-lang').onclick = languagePicker;
   document.querySelectorAll('.tab').forEach(function (t) {
     t.onclick = function () {
       var g = t.dataset.tab;
@@ -1031,11 +1080,12 @@
 
   /* published clips go to the top of the feed (called by upload.js) */
   window.__arena = {
+    toast: toast, refreshMe: refreshMe, needLogin: needLogin, esc: esc, api: api,
     openUpload: openUpload, closeOverlay: closeOverlay, me: function () { return me; },
     published: function (c) {
       addClips([c], true); feedI = 0;
       if (ov) nav('/', { replace: true });                 // the studio sheet was open: drop it and show the clip
-      else { toast('Clip publié'); if (location.pathname === '/') { L = feedClips; idx = 0; shownId = null; show(0); } }
+      else { toast('Clip publié'); if (PATHN() === '/') { L = feedClips; idx = 0; shownId = null; show(0); } }
     },
   };
 

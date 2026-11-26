@@ -11,11 +11,13 @@
 <meta property="og:url" content="{{PAGE_URL}}">
 <link rel="canonical" href="{{PAGE_URL}}">
 <meta name="arena-base" content="{{CANONICAL_URL}}">
+<meta name="arena-site" content="{{SITE_URL}}">
 <meta name="arena-brand" content="{{BRAND_NAME}}">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config={theme:{extend:{colors:{gold:'#FFD700'}}}}</script>
 <script src="https://unpkg.com/lucide@latest"></script>
 <link rel="stylesheet" href="/upload.css?v={{BUILD_ID}}">
+<script src="/i18n.js?v={{BUILD_ID}}"></script>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden;overscroll-behavior:none}
   [hidden]{display:none!important}
@@ -41,6 +43,8 @@
   #page{padding-top:32px!important}
   #vid,#vid2{transform-origin:center center}
   .invisible{visibility:hidden}
+  #phone.light{filter:invert(1) hue-rotate(180deg)}
+  #phone.light video,#phone.light img{filter:invert(1) hue-rotate(180deg)}
 </style>
 </head>
 <body>
@@ -60,8 +64,9 @@
   <header id="hdr" class="glass px-2 pb-2 pt-[calc(env(safe-area-inset-top)+6px)]">
     <div class="flex h-11 items-center gap-1.5">
       <button id="b-prev" aria-label="Précédent" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 aria-disabled:opacity-30"><i data-lucide="chevron-left" class="h-6 w-6"></i></button>
+      <button id="b-lang" aria-label="Langue" title="Langue" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-400/90 text-black"><i data-lucide="languages" class="h-5 w-5"></i></button>
       <button id="b-home" aria-label="Accueil" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 aria-disabled:opacity-30"><i data-lucide="house" class="h-5 w-5"></i></button>
-      <button id="logo" aria-label="Arena Clips, retour au fil" class="flex min-w-0 flex-1 items-center justify-center gap-1 text-lg font-extrabold tracking-tight"><span class="text-white">Arena</span><span class="text-amber-400">Clips</span><span class="dot-pulse ml-0.5 h-2 w-2 rounded-full bg-amber-400"></span></button>
+      <button id="logo" aria-label="GDNA ARENA, site officiel" title="gdnaarena.app" class="flex min-w-0 flex-1 items-center justify-center gap-1 text-base font-extrabold tracking-tight" data-notr><span class="text-white">GDNA</span><span class="text-amber-400">ARENA</span><span class="dot-pulse ml-0.5 h-2 w-2 rounded-full bg-amber-400"></span></button>
       <button id="b-next" aria-label="Suivant" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 aria-disabled:opacity-30"><i data-lucide="chevron-right" class="h-6 w-6"></i></button>
       <button id="b-x" aria-label="Fermer" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 aria-disabled:opacity-30"><i data-lucide="x" class="h-5 w-5"></i></button>
     </div>
@@ -137,60 +142,119 @@
 
   <!-- Importer (upload studio, handled by upload.js) -->
   <div class="up-sheet" id="up-sheet" hidden>
-    <div class="up-head"><button id="up-back" aria-label="Retour">‹ Retour</button><span id="up-title">Nouveau clip</span><button id="up-close" aria-label="Fermer">✕</button></div>
+    <div class="up-head"><button id="up-back" aria-label="Retour">‹ Retour</button><button id="up-lang" aria-label="Langue" title="Langue"><i data-lucide="languages" class="h-5 w-5"></i></button><span id="up-title">Nouveau clip</span><button id="up-close" aria-label="Fermer">✕</button></div>
     <div class="st-step" id="st-1">
       <label class="up-pick" id="up-pick">Choisir une vidéo ou une archive<input type="file" id="up-file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.zip,.7z,.rar,.tar,.gz,.tgz,.bz2,.xz" hidden></label>
-      <button type="button" id="up-gal" class="up-pick" style="width:100%;margin-top:10px;background:#262626;color:#fff;border:1px solid #404040">Ma galerie (dans l’appli)</button>
+      <button type="button" id="up-rec" class="up-pick up-alt"><i data-lucide="video" class="h-5 w-5"></i>&nbsp;Enregistrer une vidéo</button>
+      <button type="button" id="up-gal" class="up-pick up-alt">Ma galerie (dans l’appli)</button>
     </div>
     <div class="st-step" id="st-2" hidden>
-      <video id="st-prev" class="st-prev" playsinline controls loop></video>
-      <div class="st-lbl">Couper (Trim)</div>
-      <div class="st-tool"><label>Début <b id="st-t0v">0.0</b> s<input id="st-t0" type="range" min="0" max="1" step="0.1" value="0"></label>
-        <label>Fin <b id="st-t1v">0.0</b> s<input id="st-t1" type="range" min="0" max="1" step="0.1" value="1"></label></div>
-      <div class="st-lbl">Couverture (Cover)</div>
-      <div class="st-tool"><label>Image à <b id="st-cvv">0.0</b> s<input id="st-cv" type="range" min="0" max="1" step="0.1" value="0"></label></div>
-      <div class="st-lbl">Filtres</div>
-      <div class="st-filters" id="st-filters">
-        <button data-f="" class="on">Normal</button><button data-f="vif">Vif</button><button data-f="chaud">Chaud</button><button data-f="froid">Froid</button><button data-f="nb">N&amp;B</button><button data-f="vintage">Vintage</button>
+      <div class="st-grid">
+        <section class="st-left" aria-label="Aperçu et montage">
+          <div class="st-stage"><video id="st-prev" class="st-prev" playsinline controls loop></video></div>
+          <div class="st-tabs" id="st-tabs" role="tablist">
+            <button data-tab="adjust" class="on" role="tab">Réglages</button><button data-tab="filters" role="tab">Filtres</button><button data-tab="cut" role="tab">Couper</button><button data-tab="audio" role="tab">Audio</button><button data-tab="ai" role="tab">AI</button>
+          </div>
+          <!-- Réglage vidéo -->
+          <div class="st-pane" data-pane="adjust">
+            <div class="st-tool">
+              <label>Luminosité <b id="lk-brightness-v">0</b><input id="lk-brightness" data-lk="brightness" type="range" min="-100" max="100" value="0"></label>
+              <label>Contraste <b id="lk-contrast-v">0</b><input id="lk-contrast" data-lk="contrast" type="range" min="-100" max="100" value="0"></label>
+              <label>Saturation <b id="lk-saturation-v">0</b><input id="lk-saturation" data-lk="saturation" type="range" min="-100" max="100" value="0"></label>
+              <label>Température <b id="lk-temperature-v">0</b><input id="lk-temperature" data-lk="temperature" type="range" min="-100" max="100" value="0"></label>
+            </div>
+            <button type="button" id="lk-reset" class="st-ghost">Réinitialiser</button>
+          </div>
+          <!-- Filtres (aperçu direct) -->
+          <div class="st-pane" data-pane="filters" hidden>
+            <div class="st-filters" id="st-filters">
+              <button data-f="" class="on">Normal</button><button data-f="nb">Noir &amp; Blanc</button><button data-f="vintage">Vintage</button><button data-f="cinema">Cinéma</button><button data-f="vif">Vif</button><button data-f="doux">Doux</button><button data-f="chaud">Chaud</button><button data-f="froid">Froid</button>
+            </div>
+          </div>
+          <!-- Couper / Diviser / Supprimer une partie -->
+          <div class="st-pane" data-pane="cut" hidden>
+            <div class="st-tool"><label>Début <b id="st-t0v">0.0</b> s<input id="st-t0" type="range" min="0" max="1" step="0.1" value="0"></label>
+              <label>Fin <b id="st-t1v">0.0</b> s<input id="st-t1" type="range" min="0" max="1" step="0.1" value="1"></label></div>
+            <div class="st-row"><button type="button" id="cut-split" class="st-ghost">Diviser ici (<span id="cut-at">0.0</span> s)</button><button type="button" id="cut-reset" class="st-ghost">Réinitialiser</button></div>
+            <div id="cut-list" class="st-list"></div>
+            <div class="st-tool"><label>Couverture : image à <b id="st-cvv">0.0</b> s<input id="st-cv" type="range" min="0" max="1" step="0.1" value="0"></label></div>
+          </div>
+          <!-- Audio studio -->
+          <div class="st-pane" data-pane="audio" hidden>
+            <button type="button" id="au-rm" class="au-rm" aria-pressed="false">Supprimer l’audio original<span class="ck"> ✓</span></button>
+            <div class="st-tool" id="au-orig"><label>Son original <b id="au-ov-v">100%</b><input id="au-ov" type="range" min="0" max="100" value="100"></label></div>
+            <div class="st-tabs st-sub" id="au-cats">
+              <button data-cat="music" class="on">Musique</button><button data-cat="song">Chansons</button><button data-cat="voice">Voix</button><button data-cat="fx">Effets</button>
+            </div>
+            <input id="au-q" type="search" class="st-q" placeholder="Chercher…" aria-label="Chercher…" autocomplete="off">
+            <div class="au-add">
+              <input id="au-url" type="url" class="st-q" placeholder="Coller un lien MP3 / audio" autocomplete="off" aria-label="Lien audio">
+              <button type="button" id="au-paste" class="st-ghost">Coller</button>
+              <label class="st-ghost au-file">Fichier<input id="au-file" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac,.webm" hidden></label>
+            </div>
+            <button type="button" id="au-rec" class="st-ghost au-recbtn" hidden>Enregistrer un commentaire vocal</button>
+            <div id="au-msg" class="st-hint" role="status"></div>
+            <div id="au-list" class="st-list"></div>
+            <div class="st-lbl">Mixeur</div>
+            <div id="au-mix" class="st-list"></div>
+            <div class="st-tool" id="au-bus">
+              <label>Musique <b id="bus-music-v">70%</b><input data-bus="music" type="range" min="0" max="100" value="70"></label>
+              <label>Voix <b id="bus-voice-v">100%</b><input data-bus="voice" type="range" min="0" max="100" value="100"></label>
+              <label>Effets <b id="bus-fx-v">50%</b><input data-bus="fx" type="range" min="0" max="100" value="50"></label>
+            </div>
+            <button type="button" id="au-play" class="st-ghost">Aperçu</button>
+          </div>
+          <!-- AI / Robot: optional, OFF by default -->
+          <div class="st-pane" data-pane="ai" hidden>
+            <div class="ai-sw"><span><b>Synchroniser avec AI / Robot</b><small id="ai-state">Désactivé : vous restez en mode réel.</small></span><button type="button" id="ai-toggle" role="switch" aria-checked="false" aria-label="Synchroniser avec AI / Robot"><i></i></button></div>
+            <div id="ai-on" hidden>
+              <div class="ai">
+                <div class="ai-title">✨ Assistant IA</div>
+                <div class="ai-reply" id="ai-reply"></div>
+                <div class="ai-list" id="ai-list"></div>
+                <div class="ai-chips">
+                  <button data-q="Propose-moi une description">Description</button>
+                  <button data-q="Propose-moi un commentaire">Commentaire</button>
+                  <button data-q="Améliore l'image">Améliorer l'image</button>
+                  <button data-q="Quelle musique conviendrait ?">Musique IA selon l’ambiance</button>
+                  <button data-q="Transforme la vidéo en cartoon">Cartoon</button>
+                  <button data-q="Incarne un personnage">Personnage</button>
+                  <button type="button" id="ai-voice">Commentaire vocal IA (écoute)</button>
+                </div>
+                <div class="ai-ask"><input id="ai-q" placeholder="Demandez à l'IA…"><button id="ai-mic" title="Dictée vocale">🎤</button><button id="ai-send" title="Envoyer">➤</button></div>
+                <div class="st-hint">Lip Sync : pas encore disponible (il faut un service AI externe). Vous pouvez désactiver l’IA à tout moment pour revenir au réel.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="st-right" aria-label="Informations">
+          <div class="st-lbl">Titre (obligatoire)</div>
+          <input id="st-title" maxlength="120" placeholder="Titre du clip" autocomplete="off">
+          <div class="st-lbl">Description</div>
+          <textarea id="st-desc" placeholder="Description…"></textarea>
+          <div class="st-lbl">Hashtags</div>
+          <input id="st-tags" maxlength="200" placeholder="#arena #clip" autocomplete="off" autocapitalize="off">
+          <div class="st-lbl">Commentaire</div>
+          <textarea id="st-comment" placeholder="Commentaire…"></textarea>
+          <div class="st-lbl">Visibilité</div>
+          <select id="st-priv" aria-label="Visibilité">
+            <option value="public">Public</option><option value="followers">Abonnés uniquement</option><option value="private">Privé (moi seulement)</option>
+          </select>
+        </section>
       </div>
-      <div class="st-lbl">Titre (obligatoire)</div>
-      <input id="st-title" maxlength="120" placeholder="Titre du clip" autocomplete="off">
-      <div class="st-lbl">Description</div>
-      <textarea id="st-desc" placeholder="Description…"></textarea>
-      <div class="st-lbl">Commentaire</div>
-      <textarea id="st-comment" placeholder="Commentaire…"></textarea>
-      <div class="st-lbl">Musique</div>
-      <div class="st-music">
-        <button id="st-music-btn">♫ Choisir une musique</button>
-        <button id="st-music-del" hidden title="Supprimer la musique">🗑</button>
-      </div>
-      <div class="mu-panel" id="mu-panel" hidden>
-        <input id="mu-q" type="search" placeholder="Rechercher une musique…">
-        <div class="mu-list" id="mu-list"></div>
-      </div>
-      <div class="ai">
-        <div class="ai-title">✨ Assistant IA</div>
-        <div class="ai-reply" id="ai-reply">Analyse de la vidéo…</div>
-        <div class="ai-list" id="ai-list"></div>
-        <div class="ai-chips">
-          <button data-q="Propose-moi une description">Description</button>
-          <button data-q="Propose-moi un commentaire">Commentaire</button>
-          <button data-q="Améliore l'image">Améliorer l'image</button>
-          <button data-q="Quelle musique conviendrait ?">Musique</button>
-          <button data-q="Transforme la vidéo en cartoon">Cartoon</button>
-          <button data-q="Incarne un personnage">Personnage</button>
-        </div>
-        <div class="ai-ask"><input id="ai-q" placeholder="Demandez à l'IA…"><button id="ai-mic" title="Dictée vocale">🎤</button><button id="ai-send" title="Envoyer">➤</button></div>
-      </div>
-      <div class="st-lbl">Visibilité</div>
-      <select id="st-priv" aria-label="Visibilité" style="width:100%;padding:12px;border-radius:12px;background:#262626;color:#fff;border:1px solid #404040;font-size:15px">
-        <option value="public">Public</option><option value="followers">Abonnés uniquement</option><option value="private">Privé (moi seulement)</option>
-      </select>
-      <button class="st-pub" id="st-pub">Publier</button>
+      <div class="st-pubbar"><div class="up-track"><div id="up-bar"></div></div><div id="up-label"></div><div id="up-result"></div><button class="st-pub" id="st-pub">Publier</button></div>
     </div>
-    <div class="up-track"><div id="up-bar"></div></div>
-    <div id="up-label"></div>
-    <div id="up-result"></div>
+    <div id="up-langs" class="up-langs" hidden></div>
+  </div>
+
+  <!-- Recording screen: video in the middle, timer on top, buttons at the bottom -->
+  <div id="rec" hidden class="rec" role="dialog" aria-label="Enregistrer une vidéo">
+    <div class="rec-top"><button id="rec-x" aria-label="Fermer">✕</button><span id="rec-t" class="rec-t">00:00</span><button id="rec-flip" aria-label="Changer de caméra"><i data-lucide="refresh-cw" class="h-5 w-5"></i></button></div>
+    <div class="rec-stage"><video id="rec-v" playsinline muted></video><div id="rec-msg" class="rec-msg"></div></div>
+    <div class="rec-bar">
+      <div id="rec-live" class="rec-btns"><button id="rec-go" aria-label="Enregistrer" class="rec-go"><span></span></button></div>
+      <div id="rec-review" class="rec-btns" hidden><button id="rec-redo" class="st-ghost">Refaire</button><button id="rec-use" class="st-pub">Utiliser cette vidéo</button></div>
+    </div>
   </div>
 </div>
 
