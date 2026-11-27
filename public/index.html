@@ -279,10 +279,16 @@
 <div id="pc-back" hidden class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70">
   <div id="pc-win" class="relative overflow-hidden rounded-xl bg-black shadow-2xl ring-1 ring-white/30" style="width:min(800px,calc(100vw - 16px));height:min(450px,calc((100vw - 16px) * 9 / 16 + 44px));max-height:calc(100vh - 16px)">
     <div class="flex h-11 items-center justify-between bg-neutral-900 px-3 text-sm font-bold"><span id="pc-t" class="truncate"></span><button id="pc-x" aria-label="Fermer" class="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800">✕</button></div>
-    <video id="pc-v" controls playsinline loop class="block w-full bg-black" style="height:calc(100% - 44px)"></video>
+    <video id="pc-v" controls playsinline loop class="block w-full bg-black" style="height:calc(100% - 44px)"></video>*
   </div>
 </div>
 <script defer src="/app.js?v={{BUILD_ID}}"></script>
-<script type="module" src="/upload.js?v={{BUILD_ID}}"></script>
+<script type="module" src="/upload.js?v={{BUILD_ID}}"></script
+      <!-- ربط Arena-Clips بالوحش - Qaisypro-uploader -->
+<script>
+  // هادا هو الباب بين Arena-Clips و Qaisypro-uploader
+  window.ARENA_LINKED_TO_QAISYPRO = true;
+  console.log("Arena-Clips مربوط بالوحش ✅");
+</script>                                                  
 </body>
 </html>
